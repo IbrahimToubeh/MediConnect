@@ -23,7 +23,7 @@ public class SignupPatientRequestDTO {
     private String state;
     private String country;
     private String zipcode;
-
+    //todo: Test test
     private BloodType bloodType;
     private Double height;
     private Double weight;
