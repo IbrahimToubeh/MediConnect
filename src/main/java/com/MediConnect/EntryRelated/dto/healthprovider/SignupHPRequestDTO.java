@@ -21,14 +21,7 @@ public class SignupHPRequestDTO {
     private String address;
     private String city;
     private String country;
-    private String zipcode;
-    //private Date educationStartDate;
-    //private Date educationEndDate;
-    //private String university;
-    //private String degree;
-    //private String hospitalName;
-    //private String department;
-    //private Integer yearsOfExperience;
+
     private Double consultationFee;
     private String bio;
     private String clinicName;

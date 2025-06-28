@@ -21,9 +21,7 @@ SignupPatientRequestDTO {
     private String phoneNumber;
     private String address;
     private String city;
-    private String state;
     private String country;
-    private String zipcode;
     private Double height;
     private Double weight;
     private String allergies;
