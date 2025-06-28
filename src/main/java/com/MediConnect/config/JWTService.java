@@ -29,7 +29,7 @@ public class JWTService {
                 .map(GrantedAuthority::getAuthority)
                 .orElse("ROLE_USER");
 
-        claims.put("ROLE_", role.toUpperCase().trim());
+        claims.put("ROLE", role.toUpperCase().trim());
 
         return Jwts.builder()
                 .claims()

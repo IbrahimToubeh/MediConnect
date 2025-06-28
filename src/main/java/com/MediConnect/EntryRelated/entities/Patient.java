@@ -5,14 +5,13 @@ import com.MediConnect.EntryRelated.entities.enums.*;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import java.util.Date;
+
 import java.util.List;
 
 @Entity
 @Getter
 @Setter
 public class Patient extends Users {
-
 
     @Enumerated(EnumType.STRING)
     private BloodType bloodType;
@@ -32,8 +31,6 @@ public class Patient extends Users {
     @Column(columnDefinition = "TEXT")
     private String familyMedicalHistory;
 
-
-    //LifeStyle
     @Enumerated(EnumType.STRING)
     private DietaryHabits dietaryHabits;
 
@@ -46,16 +43,17 @@ public class Patient extends Users {
     @Enumerated(EnumType.STRING)
     private SmokingStatus smokingStatus;
 
-
     @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<LaboratoryResult> laboratoryResults;
 
     @Enumerated(EnumType.STRING)
-    MentalHealthCondition mentalHealthCondition;
+    private MentalHealthCondition mentalHealthCondition;
+
+    @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<MentalHealthMedication> mentalHealthMedications;
 
     @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<MentalHealthMedication> medications;
-
 
     private String emergencyContactName;
     private String emergencyContactPhone;

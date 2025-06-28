@@ -5,12 +5,9 @@ import com.MediConnect.EntryRelated.entities.Patient;
 import com.MediConnect.EntryRelated.entities.MentalHealthMedication;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
-import org.mapstruct.Named;
 import org.mapstruct.NullValuePropertyMappingStrategy;
 import org.mapstruct.AfterMapping;
 import org.mapstruct.MappingTarget;
-
-import java.util.Date;
 
 @Mapper(
         componentModel = "spring",
@@ -20,8 +17,8 @@ import java.util.Date;
 public interface PatientMapper {
 
     @Mapping(target = "role", constant = "PATIENT")
-    @Mapping(target = "registrationDate", source = ".", qualifiedByName = "getCurrentDate")
     @Mapping(target = "id", ignore = true) // Let JPA handle ID generation
+    @Mapping(target = "registrationDate", expression = "java(new java.util.Date())")
     @Mapping(target = "emergencyContactName", source = "emergencyContactName")
     @Mapping(target = "emergencyContactPhone", source = "emergencyContactPhone")
     @Mapping(target = "emergencyContactRelation", source = "emergencyContactRelation")
@@ -30,15 +27,10 @@ public interface PatientMapper {
     @Mapping(target = "medications", source = "medications")
     Patient signupDtoToPatient(SignupPatientRequestDTO dto);
 
-    @Named("getCurrentDate")
-    default Date getCurrentDate(SignupPatientRequestDTO dto) {
-        return new Date();
-    }
-
     @AfterMapping
     default void setPatientInMedications(@MappingTarget Patient patient) {
-        if (patient.getMedications() != null) {
-            for (MentalHealthMedication medication : patient.getMedications()) {
+        if (patient.getMentalHealthMedications() != null) {
+            for (MentalHealthMedication medication : patient.getMentalHealthMedications()) {
                 medication.setPatient(patient);
             }
         }

@@ -42,7 +42,6 @@ public class Users {
     @Temporal(TemporalType.TIMESTAMP)
     private Date registrationDate;
 
-
     private String phoneNumber;
     private String address;
     private String city;

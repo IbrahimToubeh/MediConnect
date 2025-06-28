@@ -1,7 +1,7 @@
 package com.MediConnect.EntryRelated.service.patient.mapper;
 
 import com.MediConnect.EntryRelated.dto.patient.MentalHealthMedicationDTO;
-import com.MediConnect.EntryRelated.entities.MentalHealthMedication; // Assuming you have this entity
+import com.MediConnect.EntryRelated.entities.MentalHealthMedication;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 

@@ -22,7 +22,6 @@ public class SignupHPRequestDTO {
     private String state;
     private String country;
     private String zipcode;
-
     private Date educationStartDate;
     private Date educationEndDate;
     private String university;
@@ -34,11 +33,11 @@ public class SignupHPRequestDTO {
     private String bio;
     private Integer yearsOfExperience;
     private Double consultationFee;
-
     private List<String> availableDays;
     private String availableTimeStart;
     private String availableTimeEnd;
 
+    private List<SpecialtyDTO> specialtyDTOList;
     private List<EducationHistoryDTO> educationHistories;
     private List<WorkExperienceDTO> workExperiences;
 }

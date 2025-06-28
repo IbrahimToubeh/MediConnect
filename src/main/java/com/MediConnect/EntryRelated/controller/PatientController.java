@@ -7,6 +7,7 @@ import com.MediConnect.EntryRelated.repository.LabResultRepo;
 import com.MediConnect.EntryRelated.repository.PatientRepo;
 import com.MediConnect.EntryRelated.service.patient.PatientService;
 import com.MediConnect.Service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -25,33 +28,74 @@ public class PatientController {
     private final PatientRepo patientRepo;
     private final LabResultRepo labResultRepo;
 
-    @PostMapping("/login")
-    public String login(@RequestBody LoginPatientRequestDTO patientInfo) {
-        return userService.verify(patientInfo.getUsername(), patientInfo.getPassword());
+    @PostMapping("/register")
+    public ResponseEntity<Map<String, String>> register(@Valid @RequestBody SignupPatientRequestDTO patientInfo) {
+        try {
+            String result = patientService.register(patientInfo);
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", result);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
     }
 
-    @PostMapping("/register")
-    public String register(@RequestBody SignupPatientRequestDTO patientInfo) {
-        return patientService.register(patientInfo);
+    @PostMapping("/login")
+    public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginPatientRequestDTO patientInfo) {
+        try {
+            String token = userService.authenticate(patientInfo.getUsername(), patientInfo.getPassword());
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Login successful");
+            response.put("token", token);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
     }
 
     @PostMapping("/upload-lab-result")
-    public ResponseEntity<String> uploadLabResult(
+    public ResponseEntity<Map<String, String>> uploadLabResult(
             @RequestParam("patientId") Long patientId,
             @RequestParam("description") String description,
             @RequestParam("image") MultipartFile imageFile
     ) {
-        LaboratoryResult result = new LaboratoryResult();
-        result.setDescription(description);
-        result.setPatient(patientRepo.findById(patientId).orElseThrow());
-
         try {
-            result.setImage(imageFile.getBytes());
-        } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid image file");
-        }
+            if (imageFile.isEmpty()) {
+                Map<String, String> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "Image file is required");
+                return ResponseEntity.badRequest().body(response);
+            }
 
-        labResultRepo.save(result);
-        return ResponseEntity.ok("Lab result uploaded");
+            LaboratoryResult result = new LaboratoryResult();
+            result.setDescription(description);
+            result.setPatient(patientRepo.findById(patientId)
+                    .orElseThrow(() -> new RuntimeException("Patient not found")));
+            result.setImage(imageFile.getBytes());
+            labResultRepo.save(result);
+
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Lab result uploaded successfully");
+            return ResponseEntity.ok(response);
+        } catch (IOException e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", "Invalid image file");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
     }
 }

@@ -36,7 +36,8 @@ public class SecurityConfig {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(request
                         -> request
-                        .requestMatchers("/patient/register","/patient/login","/healthprovider/login","/healthprovider/register").permitAll()
+                        .requestMatchers("/*","/patient/*","/healthprovider/*","otp/*"
+                        ).permitAll()
                         .anyRequest().authenticated())
                 .httpBasic(Customizer.withDefaults())
                 .sessionManagement(session

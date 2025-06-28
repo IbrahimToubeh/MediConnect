@@ -17,48 +17,33 @@ public class UserService {
 
     private final UserRepo userRepo;
     private final JWTService jwtService;
-    private final BCryptPasswordEncoder bCryptPasswordEncoder;
-    private final AuthenticationManager authenticationManager;
+    private final BCryptPasswordEncoder passwordEncoder;
+    private final AuthenticationManager authManager;
 
-    public Users registerUser(Users user) {
-        if (userRepo.existsByUsername(user.getUsername())) {
-            throw new RuntimeException("Username already exists");
+    public String authenticate(String username, String password) {
+        Authentication auth = authManager.authenticate(
+                new UsernamePasswordAuthenticationToken(username, password)
+        );
+        if (auth.isAuthenticated()) {
+            return jwtService.generateToken((UserDetails) auth.getPrincipal());
         }
-
-        user.setPassword(bCryptPasswordEncoder.encode(user.getPassword()));
-
-        return userRepo.save(user);
+        throw new RuntimeException("Invalid username or password");
     }
 
-    public String verify(String username, String password) {
-        try {
-            Authentication authentication = authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(username, password)
-            );
-
-            if (authentication.isAuthenticated()) {
-                UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-                return jwtService.generateToken(userDetails);
-            }
-        } catch (Exception e) {
-            return "Authentication failed: " + e.getMessage();
-        }
-        return "Authentication failed";
+    public void resetUserPassword(String email, String newPassword) {
+        Users user = userRepo.findByEmail(email.toLowerCase())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepo.save(user);
     }
 
-    // Method to verify user with specific role
-    public String verifyWithRole(String username, String password, String expectedRole) {
-        try {
-            Users user = userRepo.findByUsername(username)
-                    .orElseThrow(() -> new RuntimeException("User not found"));
+    public Users getUserByEmail(String email) {
+        return userRepo.findByEmail(email.toLowerCase())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+    }
 
-            if (!user.getRole().equals(expectedRole)) {
-                return "Invalid role for this login endpoint";
-            }
-
-            return verify(username, password);
-        } catch (Exception e) {
-            return "Authentication failed: " + e.getMessage();
-        }
+    public void registerUser(Users user) {
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        userRepo.save(user);
     }
 }
