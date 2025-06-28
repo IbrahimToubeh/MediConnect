@@ -1,6 +1,5 @@
 package com.MediConnect.EntryRelated.service.healthprovider.mapper;
 
-import com.MediConnect.Entities.Specialization;
 import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.EducationHistoryDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.SpecialtyDTO;
@@ -27,8 +26,7 @@ public interface HealthcareProviderMapper {
 
     WorkExperience mapWorkExperience(WorkExperienceDTO dto);
 
-    List<Specialization> mapspecilizations(List<SpecialtyDTO> dtos);
-    Specialization mapspecilizations(SpecialtyDTO dtos);
+
 
 
 }

@@ -1,20 +1,19 @@
 package com.MediConnect.EntryRelated.service.healthprovider.impl;
 
-import com.MediConnect.Entities.Specialization;
+import com.MediConnect.EntryRelated.dto.healthprovider.GetAllSpecialtyDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.entities.EducationHistory;
 import com.MediConnect.EntryRelated.entities.HealthcareProvider;
 import com.MediConnect.EntryRelated.entities.WorkExperience;
 import com.MediConnect.EntryRelated.repository.HealthcareProviderRepo;
-import com.MediConnect.EntryRelated.repository.SpecializationRepo;
 import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
 import com.MediConnect.EntryRelated.service.healthprovider.mapper.HealthcareProviderMapper;
-import com.MediConnect.Service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -23,7 +22,7 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
     private final HealthcareProviderRepo providerRepo;
     private final HealthcareProviderMapper providerMapper;
     private final BCryptPasswordEncoder passwordEncoder;
-    private final SpecializationRepo specializationRepo;
+
     public String register(SignupHPRequestDTO dto) {
         HealthcareProvider provider = providerMapper.signupDtoToProvider(dto);
         provider.setRole("HealthProvider");
@@ -41,17 +40,18 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
             provider.setWorkExperiences(workExperiences);
         }
 
-        if (dto.getSpecialtyDTOList() != null) {
-            List<Specialization> specializations = dto.getSpecialtyDTOList().stream()
-                    .map(specialtyDTO -> specializationRepo.findById(specialtyDTO.getSpecialityId())
-                            .orElseThrow(() -> new RuntimeException("Specialization not found: " + specialtyDTO.getSpecialityId())))
-                    .toList();
+        if (dto.getSpecializations() != null) {
 
-            provider.setSpecializations(specializations);
+            provider.setSpecializations(dto.getSpecializations());
         }
 
         providerRepo.save(provider);
         return "Success";
+    }
+
+    @Override
+    public List<GetAllSpecialtyDTO> getAllSpecialtyDTO() {
+        return List.of();
     }
 
 

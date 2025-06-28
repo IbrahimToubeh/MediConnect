@@ -1,12 +1,9 @@
 package com.MediConnect.EntryRelated.dto.healthprovider;
 
 import lombok.Getter;
-import lombok.Setter;
 
 @Getter
-@Setter
-public class SpecialtyDTO {
-
+public class GetAllSpecialtyDTO {
+    private Integer specialityId;
     private String specialtyName;
-    private String description;
 }

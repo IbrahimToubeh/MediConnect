@@ -43,5 +43,6 @@ SignupPatientRequestDTO {
     private PhysicalActivity physicalActivity;
     private SmokingStatus smokingStatus;
     private MentalHealthCondition mentalHealthCondition;
-    private List<MentalHealthMedicationDTO> medications;
+    private List<CurrentMedicationDTO> medications;
+    private List<MentalHealthMedicationDTO> mentalHealthMedications;
 }

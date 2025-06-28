@@ -1,14 +1,14 @@
 package com.MediConnect.EntryRelated.controller;
 
+import com.MediConnect.EntryRelated.dto.healthprovider.GetAllSpecialtyDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.LoginHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
 import com.MediConnect.Service.UserService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -26,5 +26,9 @@ public class HealthProviderController {
     @PostMapping("/register")
     public String register(@RequestBody SignupHPRequestDTO healthProviderInfo) {
         return healthcareProviderService.register(healthProviderInfo);
+    }
+    @GetMapping("GetAllSpecialty")
+    public List<GetAllSpecialtyDTO> GetAllSpecialty() {
+        return healthcareProviderService.getAllSpecialtyDTO();
     }
 }

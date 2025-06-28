@@ -1,5 +1,6 @@
 package com.MediConnect.EntryRelated.dto.healthprovider;
 
+import com.MediConnect.EntryRelated.entities.SpecializationType;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -19,25 +20,24 @@ public class SignupHPRequestDTO {
     private String phoneNumber;
     private String address;
     private String city;
-    private String state;
     private String country;
     private String zipcode;
-    private Date educationStartDate;
-    private Date educationEndDate;
-    private String university;
-    private String degree;
-    private String licenseNumber;
-    private String hospitalName;
-    private String clinicName;
-    private String department;
-    private String bio;
-    private Integer yearsOfExperience;
+    //private Date educationStartDate;
+    //private Date educationEndDate;
+    //private String university;
+    //private String degree;
+    //private String hospitalName;
+    //private String department;
+    //private Integer yearsOfExperience;
     private Double consultationFee;
+    private String bio;
+    private String clinicName;
+    private String licenseNumber;
     private List<String> availableDays;
     private String availableTimeStart;
     private String availableTimeEnd;
 
-    private List<SpecialtyDTO> specialtyDTOList;
+    private List<SpecializationType> specializations;
     private List<EducationHistoryDTO> educationHistories;
     private List<WorkExperienceDTO> workExperiences;
 }
