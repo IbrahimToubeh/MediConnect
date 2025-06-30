@@ -1,12 +1,18 @@
 package com.MediConnect.EntryRelated.controller;
 
-import com.MediConnect.EntryRelated.dto.*;
+import com.MediConnect.EntryRelated.dto.ForgotPasswordRequestDTO;
+import com.MediConnect.EntryRelated.dto.ResetPasswordRequestDTO;
+import com.MediConnect.EntryRelated.dto.SendMailRequestDTO;
+import com.MediConnect.EntryRelated.dto.VerifyOTPRequestDTO;
 import com.MediConnect.EntryRelated.service.OTPService;
 import com.MediConnect.Service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
 import java.util.Map;

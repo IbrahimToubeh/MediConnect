@@ -1,6 +1,5 @@
 package com.MediConnect.EntryRelated.service.patient;
 
-import com.MediConnect.EntryRelated.dto.patient.LoginPatientRequestDTO;
 import com.MediConnect.EntryRelated.dto.patient.SignupPatientRequestDTO;
 import org.springframework.stereotype.Component;
 

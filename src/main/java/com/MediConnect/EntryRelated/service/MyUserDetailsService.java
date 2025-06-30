@@ -1,8 +1,8 @@
 package com.MediConnect.EntryRelated.service;
 
-import com.MediConnect.config.UserPrincipal;
 import com.MediConnect.EntryRelated.entities.Users;
 import com.MediConnect.Repos.UserRepo;
+import com.MediConnect.config.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;

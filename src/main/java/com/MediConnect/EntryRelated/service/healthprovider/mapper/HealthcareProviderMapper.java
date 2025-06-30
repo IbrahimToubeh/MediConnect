@@ -1,13 +1,13 @@
 package com.MediConnect.EntryRelated.service.healthprovider.mapper;
 
-import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.EducationHistoryDTO;
-import com.MediConnect.EntryRelated.dto.healthprovider.SpecialtyDTO;
+import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.WorkExperienceDTO;
 import com.MediConnect.EntryRelated.entities.EducationHistory;
 import com.MediConnect.EntryRelated.entities.HealthcareProvider;
 import com.MediConnect.EntryRelated.entities.WorkExperience;
-import org.mapstruct.*;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
 
 import java.util.List;
 
@@ -25,8 +25,6 @@ public interface HealthcareProviderMapper {
     EducationHistory mapEducationHistory(EducationHistoryDTO dto);
 
     WorkExperience mapWorkExperience(WorkExperienceDTO dto);
-
-
 
 
 }

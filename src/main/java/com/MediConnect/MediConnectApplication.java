@@ -9,8 +9,8 @@ import org.springframework.cache.annotation.EnableCaching;
 @EnableCaching
 public class MediConnectApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(MediConnectApplication.class, args);
-	}
+    public static void main(String[] args) {
+        SpringApplication.run(MediConnectApplication.class, args);
+    }
 
 }

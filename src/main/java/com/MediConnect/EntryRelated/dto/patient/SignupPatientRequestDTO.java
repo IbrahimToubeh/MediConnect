@@ -19,9 +19,6 @@ SignupPatientRequestDTO {
     private String gender;
     private Date dateOfBirth;
     private String phoneNumber;
-    private String address;//delete
-    private String city;//delete
-    private String country;//delete
     private Double height;
     private Double weight;
     private String allergies;
@@ -29,11 +26,6 @@ SignupPatientRequestDTO {
     private String previousSurgeries;
     private String familyMedicalHistory;
 
-    private String emergencyContactName;// delete
-    private String emergencyContactPhone;//delete
-    private String emergencyContactRelation;// delete
-    private String insuranceProvider;//delete
-    private String insuranceNumber;//delete
 
     private BloodType bloodType;
     private DietaryHabits dietaryHabits;

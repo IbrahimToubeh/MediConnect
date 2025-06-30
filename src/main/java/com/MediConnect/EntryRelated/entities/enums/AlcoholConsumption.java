@@ -1,7 +1,7 @@
 package com.MediConnect.EntryRelated.entities.enums;
 
 public enum AlcoholConsumption {
-    Never_Drinks, Occasionally_Drinks("Social Drinking"), Regularly_Drinks("Weekly"),Heavy_Drinker,Former_Drinker;
+    Never_Drinks, Occasionally_Drinks("Social Drinking"), Regularly_Drinks("Weekly"), Heavy_Drinker, Former_Drinker;
 
     private final String label;
 

@@ -27,6 +27,7 @@ public class HealthProviderController {
     public String register(@RequestBody SignupHPRequestDTO healthProviderInfo) {
         return healthcareProviderService.register(healthProviderInfo);
     }
+
     @GetMapping("GetAllSpecialty")
     public List<GetAllSpecialtyDTO> GetAllSpecialty() {
         return healthcareProviderService.getAllSpecialtyDTO();

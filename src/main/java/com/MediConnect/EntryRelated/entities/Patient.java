@@ -67,4 +67,6 @@ public class Patient extends Users {
 
     @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<MedicalRecord> medicalRecords;
+
+    private List<Long> listOfFollowedPeople;
 }

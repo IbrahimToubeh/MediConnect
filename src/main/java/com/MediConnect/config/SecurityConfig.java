@@ -25,7 +25,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableMethodSecurity()
 public class SecurityConfig {
 
-    private final  UserDetailsService userDetailsService;
+    private final UserDetailsService userDetailsService;
 
     private final JwtFilter jwtFilter;
 
@@ -36,12 +36,12 @@ public class SecurityConfig {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(request
                         -> request
-                        .requestMatchers("/*","/patient/*","/healthprovider/*","otp/*"
+                        .requestMatchers("/*", "/patient/*", "/healthprovider/*", "otp/*"
                         ).permitAll()
                         .anyRequest().authenticated())
                 .httpBasic(Customizer.withDefaults())
                 .sessionManagement(session
-                        ->session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                        -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
@@ -53,6 +53,7 @@ public class SecurityConfig {
         authProvider.setPasswordEncoder(new BCryptPasswordEncoder(12));
         return authProvider;
     }
+
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();

@@ -8,6 +8,7 @@ import java.util.List;
 
 @Component
 public interface HealthcareProviderService {
-     String register(SignupHPRequestDTO signupHPRequestDTO);
-     List<GetAllSpecialtyDTO> getAllSpecialtyDTO();
+    String register(SignupHPRequestDTO signupHPRequestDTO);
+
+    List<GetAllSpecialtyDTO> getAllSpecialtyDTO();
 }

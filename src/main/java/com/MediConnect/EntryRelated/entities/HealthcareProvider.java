@@ -4,16 +4,13 @@ import com.MediConnect.Entities.AppointmentEntity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import java.util.Date;
+
 import java.util.List;
 
 @Entity
 @Getter
 @Setter
 public class HealthcareProvider extends Users {
-
-
-
 
     @ElementCollection(fetch = FetchType.EAGER)
     @Enumerated(EnumType.STRING)
@@ -46,4 +43,6 @@ public class HealthcareProvider extends Users {
 
     @OneToMany(mappedBy = "provider", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<MedicalRecord> medicalRecords;
+
+    private List<Long> followList;
 }
