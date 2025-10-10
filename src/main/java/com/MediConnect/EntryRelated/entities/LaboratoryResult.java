@@ -16,7 +16,7 @@ public class LaboratoryResult {
     private String description;
 
     @Lob
-    @Column(columnDefinition = "LONGBLOB")
+    @Column(columnDefinition = "BYTEA")
     private byte[] image;
 
     @ManyToOne(fetch = FetchType.LAZY)

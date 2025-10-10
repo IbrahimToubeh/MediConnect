@@ -53,7 +53,7 @@ public class Patient extends Users {
     private List<MentalHealthMedication> mentalHealthMedications;
 
     @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<MentalHealthMedication> medications;
+    private List<Medication> medications;
 
     private String emergencyContactName;
     private String emergencyContactPhone;
