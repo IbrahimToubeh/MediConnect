@@ -22,7 +22,7 @@ public class UpdatePatientProfileRequestDTO {
     private Double weight;
     private String bloodType;
     
-    // Medical Information
+    // Medical Information hi
     private String allergies;
     private String medicalConditions;
     private String previousSurgeries;
