@@ -46,4 +46,43 @@ public class UserService {
         user.setPassword(passwordEncoder.encode(user.getPassword()));
         userRepo.save(user);
     }
+
+    public void changePassword(String username, String currentPassword, String newPassword) {
+        Users user = userRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        
+        // Verify current password
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new RuntimeException("Current password is incorrect");
+        }
+        
+        // Set new password
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepo.save(user);
+    }
+
+    public Users getUserByUsername(String username) {
+        return userRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    public void enableTwoFactor(String username) {
+        Users user = userRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        user.setTwoFactorEnabled(true);
+        userRepo.save(user);
+    }
+
+    public void disableTwoFactor(String username) {
+        Users user = userRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        user.setTwoFactorEnabled(false);
+        userRepo.save(user);
+    }
+
+    public boolean isTwoFactorEnabled(String username) {
+        Users user = userRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        return user.getTwoFactorEnabled() != null && user.getTwoFactorEnabled();
+    }
 }

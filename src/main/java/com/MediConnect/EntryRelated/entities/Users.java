@@ -49,4 +49,13 @@ public class Users {
     private String state;
     private String country;
     private String zipcode;
+    
+    @Column(columnDefinition = "TEXT")
+    private String profilePicture;
+    
+    @Column(columnDefinition = "TEXT")
+    private String bannerPicture;
+    
+    @Column(name = "two_factor_enabled")
+    private Boolean twoFactorEnabled = false;
 }

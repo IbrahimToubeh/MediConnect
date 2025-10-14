@@ -1,6 +1,5 @@
 package com.MediConnect.socialmedia.entity;
 
-
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -11,17 +10,17 @@ import java.util.List;
 @Entity
 @Getter
 @Setter
-public class MedicalPostComment {
+public class CommentReply {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @ManyToOne
-    @JoinColumn(name = "post_id", nullable = false)
-    private MedicalPost post;
+    @JoinColumn(name = "comment_id", nullable = false)
+    private MedicalPostComment comment;
 
-    private Long commenterId;
+    private Long replierId;
 
     @Column(columnDefinition = "TEXT", nullable = false)
     private String content;
@@ -29,9 +28,7 @@ public class MedicalPostComment {
     @Temporal(TemporalType.TIMESTAMP)
     private Date createdAt = new Date();
 
-    @OneToMany(mappedBy = "comment", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<CommentLike> likes = new java.util.ArrayList<>();
-
-    @OneToMany(mappedBy = "comment", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<CommentReply> replies = new java.util.ArrayList<>();
+    @OneToMany(mappedBy = "reply", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<CommentReplyLike> likes = new java.util.ArrayList<>();
 }
+

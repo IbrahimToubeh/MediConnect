@@ -10,4 +10,6 @@ import java.util.List;
 @Repository
 public interface MedicalPostRepository extends JpaRepository<MedicalPost, Long> {
     List<MedicalPost> findAllByOrderByCreatedAtDesc();
+    
+    List<MedicalPost> findByPostProviderIdOrderByCreatedAtDesc(Long providerId);
 }

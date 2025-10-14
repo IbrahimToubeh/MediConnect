@@ -3,11 +3,18 @@ package com.MediConnect.EntryRelated.controller;
 import com.MediConnect.EntryRelated.dto.healthprovider.GetAllSpecialtyDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.LoginHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
+import com.MediConnect.EntryRelated.dto.ChangePasswordRequestDTO;
+import com.MediConnect.EntryRelated.dto.NotificationPreferencesDTO;
+import com.MediConnect.EntryRelated.dto.PrivacySettingsDTO;
 import com.MediConnect.EntryRelated.entities.HealthcareProvider;
 import com.MediConnect.EntryRelated.entities.EducationHistory;
 import com.MediConnect.EntryRelated.entities.WorkExperience;
 import com.MediConnect.EntryRelated.entities.SpecializationType;
 import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
+import com.MediConnect.EntryRelated.service.OTPService;
+import com.MediConnect.EntryRelated.service.ActivityService;
+import com.MediConnect.EntryRelated.service.NotificationPreferencesService;
+import com.MediConnect.EntryRelated.service.PrivacySettingsService;
 import com.MediConnect.Service.UserService;
 import com.MediConnect.config.JWTService;
 import jakarta.validation.Valid;
@@ -16,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
@@ -32,9 +40,13 @@ public class HealthProviderController {
     private final HealthcareProviderService healthcareProviderService;
     private final UserService userService;
     private final JWTService jwtService;
+    private final OTPService otpService;
+    private final ActivityService activityService;
+    private final NotificationPreferencesService notificationPreferencesService;
+    private final PrivacySettingsService privacySettingsService;
 
     @PostMapping("/login")
-    public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginHPRequestDTO healthProviderInfo) {
+    public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginHPRequestDTO healthProviderInfo, HttpServletRequest request) {
         try {
             System.out.println("DEBUG LOGIN: Attempting login for username: '" + healthProviderInfo.getUsername() + "'");
             
@@ -54,8 +66,28 @@ public class HealthProviderController {
             }
             
             System.out.println("DEBUG LOGIN: Attempting authentication with Spring Security");
-            // Then authenticate the user
-            String token = userService.authenticate(healthProviderInfo.getUsername(), healthProviderInfo.getPassword());
+            // Authenticate the user (verify username/password)
+            userService.authenticate(healthProviderInfo.getUsername(), healthProviderInfo.getPassword());
+            
+            // Check if 2FA is enabled
+            if (userService.isTwoFactorEnabled(healthProviderInfo.getUsername())) {
+                // Send OTP to email
+                otpService.sendLoginOTP(provider.getEmail());
+                
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "2fa_required");
+                response.put("message", "OTP sent to your email. Please verify to complete login.");
+                response.put("email", provider.getEmail());
+                response.put("username", healthProviderInfo.getUsername());
+                response.put("userId", provider.getId());
+                return ResponseEntity.ok(response);
+            }
+            
+            // If 2FA not enabled, generate token immediately
+            String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(provider));
+            
+            // Create login session and log activity
+            activityService.createLoginSession(provider, token, request);
             
             System.out.println("DEBUG LOGIN: Authentication successful, token generated");
             Map<String, Object> response = new HashMap<>();
@@ -67,6 +99,43 @@ public class HealthProviderController {
         } catch (Exception e) {
             System.out.println("ERROR LOGIN: Exception during login: " + e.getMessage());
             e.printStackTrace();
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+    }
+
+    @PostMapping("/verify-login-otp")
+    public ResponseEntity<Map<String, Object>> verifyLoginOTP(@RequestBody Map<String, String> request, HttpServletRequest httpRequest) {
+        try {
+            String username = request.get("username");
+            String otp = request.get("otp");
+            
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+            
+            // Verify OTP
+            if (!otpService.verifyLoginOTP(provider.getEmail(), otp)) {
+                throw new RuntimeException("Invalid or expired OTP");
+            }
+            
+            // Clear the OTP
+            otpService.clearLoginOTP(provider.getEmail());
+            
+            // Generate token
+            String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(provider));
+            
+            // Create login session and log activity
+            activityService.createLoginSession(provider, token, httpRequest);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Login successful");
+            response.put("token", token);
+            response.put("userId", provider.getId());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
             Map<String, Object> response = new HashMap<>();
             response.put("status", "error");
             response.put("message", e.getMessage());
@@ -116,6 +185,45 @@ public class HealthProviderController {
             response.put("status", "error");
             response.put("message", e.getMessage());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+    }
+
+    @GetMapping("/public-profile/{id}")
+    public ResponseEntity<Map<String, Object>> getPublicProfile(@PathVariable Long id) {
+        try {
+            // Find healthcare provider by ID
+            HealthcareProvider provider = healthcareProviderService.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+            
+            // Check if profile is public
+            boolean isPublic = privacySettingsService.isProfilePublic(provider);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            
+            if (!isPublic) {
+                // Profile is private
+                response.put("isPrivate", true);
+                response.put("message", "This profile is private");
+                // Only return basic info
+                Map<String, Object> basicInfo = new HashMap<>();
+                basicInfo.put("id", provider.getId());
+                basicInfo.put("firstName", provider.getFirstName());
+                basicInfo.put("lastName", provider.getLastName());
+                basicInfo.put("profilePicture", provider.getProfilePicture());
+                response.put("data", basicInfo);
+            } else {
+                // Profile is public - apply individual privacy settings
+                response.put("isPrivate", false);
+                response.put("data", buildHealthcareProviderProfileResponseDTOWithPrivacy(provider));
+            }
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
         }
     }
 
@@ -176,6 +284,9 @@ public class HealthProviderController {
         profile.put("availableDays", provider.getAvailableDays());
         profile.put("availableTimeStart", provider.getAvailableTimeStart());
         profile.put("availableTimeEnd", provider.getAvailableTimeEnd());
+        profile.put("insuranceAccepted", provider.getInsuranceAccepted() != null ? provider.getInsuranceAccepted() : new java.util.ArrayList<>());
+        profile.put("profilePicture", provider.getProfilePicture());
+        profile.put("bannerPicture", provider.getBannerPicture());
         
         // Specializations
         if (provider.getSpecializations() != null) {
@@ -284,6 +395,16 @@ public class HealthProviderController {
         if (updateRequest.getAvailableTimeEnd() != null) {
             provider.setAvailableTimeEnd(updateRequest.getAvailableTimeEnd());
         }
+        if (updateRequest.getInsuranceAccepted() != null) {
+            provider.setInsuranceAccepted(updateRequest.getInsuranceAccepted());
+            System.out.println("DEBUG: Updated insuranceAccepted: " + updateRequest.getInsuranceAccepted());
+        }
+        if (updateRequest.getProfilePicture() != null) {
+            provider.setProfilePicture(updateRequest.getProfilePicture());
+        }
+        if (updateRequest.getBannerPicture() != null) {
+            provider.setBannerPicture(updateRequest.getBannerPicture());
+        }
         if (updateRequest.getSpecializations() != null) {
             List<SpecializationType> specializationTypes = updateRequest.getSpecializations().stream()
                     .map(spec -> {
@@ -357,5 +478,333 @@ public class HealthProviderController {
             e.printStackTrace();
             return null;
         }
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<List<Map<String, Object>>> searchDoctors(
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) String specialty,
+            @RequestParam(required = false) String insurance,
+            @RequestParam(required = false) Double minFee,
+            @RequestParam(required = false) Double maxFee,
+            @RequestParam(required = false) Double minRating
+    ) {
+        try {
+            System.out.println("DEBUG SEARCH: name=" + name + ", city=" + city + ", specialty=" + specialty + 
+                             ", insurance=" + insurance + ", minFee=" + minFee + ", maxFee=" + maxFee + ", minRating=" + minRating);
+            
+            List<HealthcareProvider> providers = healthcareProviderService.searchDoctors(
+                name, city, specialty, insurance, minFee, maxFee, minRating
+            );
+            
+            System.out.println("DEBUG SEARCH: Found " + providers.size() + " providers");
+            
+            // Convert to response DTOs
+            List<Map<String, Object>> response = providers.stream()
+                .map(provider -> {
+                    Map<String, Object> providerMap = new HashMap<>();
+                    providerMap.put("id", provider.getId());
+                    providerMap.put("firstName", provider.getFirstName());
+                    providerMap.put("lastName", provider.getLastName());
+                    providerMap.put("profilePicture", provider.getProfilePicture());
+                    providerMap.put("specializations", provider.getSpecializations());
+                    providerMap.put("city", provider.getCity());
+                    providerMap.put("clinicName", provider.getClinicName());
+                    providerMap.put("consultationFee", provider.getConsultationFee());
+                    providerMap.put("insuranceAccepted", provider.getInsuranceAccepted());
+                    providerMap.put("bio", provider.getBio());
+                    
+                    // Add mock rating (consistent with search filter logic)
+                    double mockRating = 3.5 + (provider.getId() % 15) * 0.1; // Ratings between 3.5-5.0
+                    providerMap.put("rating", mockRating);
+                    
+                    return providerMap;
+                })
+                .collect(Collectors.toList());
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.out.println("ERROR SEARCH: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(List.of());
+        }
+    }
+
+    @PutMapping("/change-password")
+    public ResponseEntity<Map<String, String>> changePassword(
+            @RequestHeader("Authorization") String token,
+            @Valid @RequestBody ChangePasswordRequestDTO changePasswordRequest) {
+        try {
+            // Validate that new password and confirm password match
+            if (!changePasswordRequest.getNewPassword().equals(changePasswordRequest.getConfirmPassword())) {
+                Map<String, String> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "New password and confirm password do not match");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Extract username from JWT token
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            
+            // Verify user is a healthcare provider
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+            
+            // Change password using UserService
+            userService.changePassword(username, changePasswordRequest.getCurrentPassword(), changePasswordRequest.getNewPassword());
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Password changed successfully");
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", "Failed to change password. Please try again.");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    @PostMapping("/enable-2fa")
+    public ResponseEntity<Map<String, String>> enableTwoFactor(@RequestHeader("Authorization") String token) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            
+            userService.enableTwoFactor(username);
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Two-factor authentication enabled successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PostMapping("/disable-2fa")
+    public ResponseEntity<Map<String, String>> disableTwoFactor(@RequestHeader("Authorization") String token) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            
+            userService.disableTwoFactor(username);
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Two-factor authentication disabled successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/2fa-status")
+    public ResponseEntity<Map<String, Object>> getTwoFactorStatus(@RequestHeader("Authorization") String token) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            
+            boolean enabled = userService.isTwoFactorEnabled(username);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("twoFactorEnabled", enabled);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/activity")
+    public ResponseEntity<Map<String, Object>> getActivity(org.springframework.security.core.Authentication authentication) {
+        try {
+            String username = authentication.getName();
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("sessions", activityService.getLoginSessions(provider));
+            response.put("activities", activityService.getAccountActivities(provider, 50));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/notification-preferences")
+    public ResponseEntity<Map<String, Object>> getNotificationPreferences(org.springframework.security.core.Authentication authentication) {
+        try {
+            String username = authentication.getName();
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("preferences", notificationPreferencesService.getNotificationPreferences(provider));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PutMapping("/notification-preferences")
+    public ResponseEntity<Map<String, Object>> updateNotificationPreferences(
+            org.springframework.security.core.Authentication authentication,
+            @RequestBody NotificationPreferencesDTO preferences) {
+        try {
+            String username = authentication.getName();
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Notification preferences updated successfully");
+            response.put("preferences", notificationPreferencesService.updateNotificationPreferences(provider, preferences));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/privacy-settings")
+    public ResponseEntity<Map<String, Object>> getPrivacySettings(org.springframework.security.core.Authentication authentication) {
+        try {
+            String username = authentication.getName();
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("settings", privacySettingsService.getPrivacySettings(provider));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PutMapping("/privacy-settings")
+    public ResponseEntity<Map<String, Object>> updatePrivacySettings(
+            org.springframework.security.core.Authentication authentication,
+            @RequestBody PrivacySettingsDTO settings) {
+        try {
+            String username = authentication.getName();
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Privacy settings updated successfully");
+            response.put("settings", privacySettingsService.updatePrivacySettings(provider, settings));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    private Map<String, Object> buildHealthcareProviderProfileResponseDTOWithPrivacy(HealthcareProvider provider) {
+        Map<String, Object> profile = new HashMap<>();
+        
+        // Get privacy settings
+        var privacySettings = privacySettingsService.getPrivacySettings(provider);
+        
+        // Basic Information (always shown)
+        profile.put("id", provider.getId());
+        profile.put("username", provider.getUsername());
+        profile.put("firstName", provider.getFirstName());
+        profile.put("lastName", provider.getLastName());
+        profile.put("gender", provider.getGender());
+        profile.put("dateOfBirth", provider.getDateOfBirth());
+        
+        // Conditional information based on privacy settings
+        if (privacySettings.getShowEmail()) {
+            profile.put("email", provider.getEmail());
+        }
+        if (privacySettings.getShowPhone()) {
+            profile.put("phoneNumber", provider.getPhoneNumber());
+        }
+        if (privacySettings.getShowAddress()) {
+            profile.put("address", provider.getAddress());
+            profile.put("city", provider.getCity());
+            profile.put("country", provider.getCountry());
+        }
+        
+        // Professional Information (always shown for public profiles)
+        profile.put("consultationFee", provider.getConsultationFee());
+        profile.put("bio", provider.getBio());
+        profile.put("clinicName", provider.getClinicName());
+        profile.put("licenseNumber", provider.getLicenseNumber());
+        profile.put("availableDays", provider.getAvailableDays());
+        profile.put("availableTimeStart", provider.getAvailableTimeStart());
+        profile.put("availableTimeEnd", provider.getAvailableTimeEnd());
+        profile.put("insuranceAccepted", provider.getInsuranceAccepted() != null ? provider.getInsuranceAccepted() : new java.util.ArrayList<>());
+        profile.put("profilePicture", provider.getProfilePicture());
+        profile.put("bannerPicture", provider.getBannerPicture());
+        
+        // Specializations (always shown)
+        if (provider.getSpecializations() != null) {
+            profile.put("specializations", provider.getSpecializations().stream()
+                .map(Enum::name)
+                .collect(java.util.stream.Collectors.toList()));
+        } else {
+            profile.put("specializations", new java.util.ArrayList<>());
+        }
+        
+        // Education Histories (always shown for public profiles)
+        if (provider.getEducationHistories() != null) {
+            profile.put("educationHistories", provider.getEducationHistories().stream()
+                .map(this::convertToEducationHistoryDTO)
+                .collect(java.util.stream.Collectors.toList()));
+        } else {
+            profile.put("educationHistories", new java.util.ArrayList<>());
+        }
+        
+        // Work Experiences (always shown for public profiles)
+        if (provider.getWorkExperiences() != null) {
+            profile.put("workExperiences", provider.getWorkExperiences().stream()
+                .map(this::convertToWorkExperienceDTO)
+                .collect(java.util.stream.Collectors.toList()));
+        } else {
+            profile.put("workExperiences", new java.util.ArrayList<>());
+        }
+        
+        return profile;
     }
 }

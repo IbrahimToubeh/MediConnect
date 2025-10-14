@@ -13,6 +13,10 @@ public interface MedicalPostService {
     MedicalPost createPost(CreatePostRequestDTO createPostRequestDTO);
     List<Map<String, Object>> getAllPostsWithDetails();
     List<Map<String, Object>> getAllPostsWithDetails(Long userId);
+    
+    List<Map<String, Object>> getPostsByDoctor(Long doctorId, Long userId);
+    
     boolean likePost(Long postId, Long userId);
     void deletePost(Long postId, Long userId);
+    List<Map<String, Object>> getPostLikers(Long postId);
 }

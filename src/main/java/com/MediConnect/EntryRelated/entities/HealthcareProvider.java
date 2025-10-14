@@ -38,6 +38,10 @@ public class HealthcareProvider extends Users {
     private String availableTimeStart;
     private String availableTimeEnd;
 
+    @ElementCollection
+    @CollectionTable(name = "provider_insurance")
+    private List<String> insuranceAccepted;
+
     @OneToMany(mappedBy = "healthcareProvider", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<AppointmentEntity> appointments;
 

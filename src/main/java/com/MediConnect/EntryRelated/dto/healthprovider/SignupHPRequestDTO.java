@@ -49,6 +49,9 @@ public class SignupHPRequestDTO {
     private List<String> availableDays;
     private String availableTimeStart;
     private String availableTimeEnd;
+    private List<String> insuranceAccepted;
+    private String profilePicture;
+    private String bannerPicture;
 
     private List<String> specializations;
     private List<EducationHistoryDTO> educationHistories;

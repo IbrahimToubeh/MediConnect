@@ -16,5 +16,9 @@ public interface HealthcareProviderService {
     
     Optional<HealthcareProvider> findByUsername(String username);
     
+    Optional<HealthcareProvider> findById(Long id);
+    
     HealthcareProvider save(HealthcareProvider provider);
+    
+    List<HealthcareProvider> searchDoctors(String name, String city, String specialty, String insurance, Double minFee, Double maxFee, Double minRating);
 }

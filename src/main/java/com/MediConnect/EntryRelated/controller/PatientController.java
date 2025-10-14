@@ -1,6 +1,9 @@
 package com.MediConnect.EntryRelated.controller;
 
 import com.MediConnect.EntryRelated.dto.patient.*;
+import com.MediConnect.EntryRelated.dto.ChangePasswordRequestDTO;
+import com.MediConnect.EntryRelated.dto.NotificationPreferencesDTO;
+import com.MediConnect.EntryRelated.dto.PrivacySettingsDTO;
 import com.MediConnect.EntryRelated.entities.LaboratoryResult;
 import com.MediConnect.EntryRelated.entities.Medication;
 import com.MediConnect.EntryRelated.entities.MentalHealthMedication;
@@ -9,6 +12,10 @@ import com.MediConnect.config.JWTService;
 import com.MediConnect.EntryRelated.repository.LabResultRepo;
 import com.MediConnect.EntryRelated.repository.PatientRepo;
 import com.MediConnect.EntryRelated.service.patient.PatientService;
+import com.MediConnect.EntryRelated.service.OTPService;
+import com.MediConnect.EntryRelated.service.ActivityService;
+import com.MediConnect.EntryRelated.service.NotificationPreferencesService;
+import com.MediConnect.EntryRelated.service.PrivacySettingsService;
 import com.MediConnect.Service.UserService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -21,6 +28,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
@@ -36,6 +44,10 @@ public class PatientController {
     private final PatientRepo patientRepo;
     private final LabResultRepo labResultRepo;
     private final JWTService jwtService;
+    private final OTPService otpService;
+    private final ActivityService activityService;
+    private final NotificationPreferencesService notificationPreferencesService;
+    private final PrivacySettingsService privacySettingsService;
 
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(@Valid @RequestBody SignupPatientRequestDTO patientInfo) {
@@ -54,7 +66,7 @@ public class PatientController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginPatientRequestDTO patientInfo) {
+    public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginPatientRequestDTO patientInfo, HttpServletRequest request) {
         try {
             // First verify the user is a patient before authentication
             Patient patient = patientRepo.findByUsername(patientInfo.getUsername())
@@ -65,12 +77,67 @@ public class PatientController {
                 throw new RuntimeException("Access denied: This account is not a patient account");
             }
             
-            // Then authenticate the user
-            String token = userService.authenticate(patientInfo.getUsername(), patientInfo.getPassword());
+            // Authenticate the user (verify username/password)
+            userService.authenticate(patientInfo.getUsername(), patientInfo.getPassword());
+            
+            // Check if 2FA is enabled
+            if (userService.isTwoFactorEnabled(patientInfo.getUsername())) {
+                // Send OTP to email
+                otpService.sendLoginOTP(patient.getEmail());
+                
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "2fa_required");
+                response.put("message", "OTP sent to your email. Please verify to complete login.");
+                response.put("email", patient.getEmail());
+                response.put("username", patientInfo.getUsername());
+                return ResponseEntity.ok(response);
+            }
+            
+            // If 2FA not enabled, generate token immediately
+            String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(patient));
+            
+            // Create login session and log activity
+            activityService.createLoginSession(patient, token, request);
             
             Map<String, Object> response = new HashMap<>();
             response.put("status", "success");
             response.put("message", "Patient login successful");
+            response.put("token", token);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+    }
+
+    @PostMapping("/verify-login-otp")
+    public ResponseEntity<Map<String, Object>> verifyLoginOTP(@RequestBody Map<String, String> request, HttpServletRequest httpRequest) {
+        try {
+            String username = request.get("username");
+            String otp = request.get("otp");
+            
+            Patient patient = patientRepo.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Patient not found"));
+            
+            // Verify OTP
+            if (!otpService.verifyLoginOTP(patient.getEmail(), otp)) {
+                throw new RuntimeException("Invalid or expired OTP");
+            }
+            
+            // Clear the OTP
+            otpService.clearLoginOTP(patient.getEmail());
+            
+            // Generate token
+            String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(patient));
+            
+            // Create login session and log activity
+            activityService.createLoginSession(patient, token, httpRequest);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Login successful");
             response.put("token", token);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -499,5 +566,213 @@ public class PatientController {
         response.put("status", "success");
         response.put("message", "Patient controller is working");
         return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/change-password")
+    public ResponseEntity<Map<String, String>> changePassword(
+            @RequestHeader("Authorization") String token,
+            @Valid @RequestBody ChangePasswordRequestDTO changePasswordRequest) {
+        try {
+            // Validate that new password and confirm password match
+            if (!changePasswordRequest.getNewPassword().equals(changePasswordRequest.getConfirmPassword())) {
+                Map<String, String> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "New password and confirm password do not match");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Extract username from JWT token
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            
+            // Verify user is a patient
+            Patient patient = patientRepo.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Patient not found"));
+            
+            // Change password using UserService
+            userService.changePassword(username, changePasswordRequest.getCurrentPassword(), changePasswordRequest.getNewPassword());
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Password changed successfully");
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", "Failed to change password. Please try again.");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    @PostMapping("/enable-2fa")
+    public ResponseEntity<Map<String, String>> enableTwoFactor(@RequestHeader("Authorization") String token) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            
+            userService.enableTwoFactor(username);
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Two-factor authentication enabled successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PostMapping("/disable-2fa")
+    public ResponseEntity<Map<String, String>> disableTwoFactor(@RequestHeader("Authorization") String token) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            
+            userService.disableTwoFactor(username);
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Two-factor authentication disabled successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/2fa-status")
+    public ResponseEntity<Map<String, Object>> getTwoFactorStatus(@RequestHeader("Authorization") String token) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            
+            boolean enabled = userService.isTwoFactorEnabled(username);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("twoFactorEnabled", enabled);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/activity")
+    public ResponseEntity<Map<String, Object>> getActivity(Authentication authentication) {
+        try {
+            String username = authentication.getName();
+            Patient patient = patientRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Patient not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("sessions", activityService.getLoginSessions(patient));
+            response.put("activities", activityService.getAccountActivities(patient, 50));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/notification-preferences")
+    public ResponseEntity<Map<String, Object>> getNotificationPreferences(Authentication authentication) {
+        try {
+            String username = authentication.getName();
+            Patient patient = patientRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Patient not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("preferences", notificationPreferencesService.getNotificationPreferences(patient));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PutMapping("/notification-preferences")
+    public ResponseEntity<Map<String, Object>> updateNotificationPreferences(
+            Authentication authentication,
+            @RequestBody NotificationPreferencesDTO preferences) {
+        try {
+            String username = authentication.getName();
+            Patient patient = patientRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Patient not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Notification preferences updated successfully");
+            response.put("preferences", notificationPreferencesService.updateNotificationPreferences(patient, preferences));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/privacy-settings")
+    public ResponseEntity<Map<String, Object>> getPrivacySettings(Authentication authentication) {
+        try {
+            String username = authentication.getName();
+            Patient patient = patientRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Patient not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("settings", privacySettingsService.getPrivacySettings(patient));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PutMapping("/privacy-settings")
+    public ResponseEntity<Map<String, Object>> updatePrivacySettings(
+            Authentication authentication,
+            @RequestBody PrivacySettingsDTO settings) {
+        try {
+            String username = authentication.getName();
+            Patient patient = patientRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Patient not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Privacy settings updated successfully");
+            response.put("settings", privacySettingsService.updatePrivacySettings(patient, settings));
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
     }
 }

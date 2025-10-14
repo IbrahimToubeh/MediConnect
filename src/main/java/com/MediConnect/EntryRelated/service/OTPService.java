@@ -62,6 +62,25 @@ public class OTPService {
         return "true".equals(verified);
     }
 
+    public String sendLoginOTP(String email) {
+        String cleanedEmail = normalize(email);
+        validateEmail(cleanedEmail);
+        String otp = generateOTP();
+        otpCacheService.cacheOTP(cleanedEmail + "_LOGIN", otp);
+        sendOTPEmail(cleanedEmail, otp, "Login Verification");
+        return "Login OTP sent successfully";
+    }
+
+    public boolean verifyLoginOTP(String email, String otp) {
+        String cleanedEmail = normalize(email);
+        String cached = otpCacheService.getCachedOTP(cleanedEmail + "_LOGIN");
+        return otp != null && otp.equals(cached);
+    }
+
+    public void clearLoginOTP(String email) {
+        otpCacheService.clearOTP(normalize(email) + "_LOGIN");
+    }
+
     private void sendOTPEmail(String email, String otp, String purpose) {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setTo(email);

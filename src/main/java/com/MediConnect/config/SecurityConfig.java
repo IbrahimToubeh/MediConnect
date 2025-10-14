@@ -42,7 +42,9 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(request
                         -> request
-                        .requestMatchers("/", "/patient/register", "/patient/login", "/healthprovider/register", "/healthprovider/login", "/otp/*"
+                        .requestMatchers("/", "/patient/register", "/patient/login", "/patient/verify-login-otp", 
+                                "/healthprovider/register", "/healthprovider/login", "/healthprovider/verify-login-otp", "/otp/*",
+                                "/healthprovider/public-profile/*"
                         ).permitAll()
                         .anyRequest().authenticated())
                 .httpBasic(Customizer.withDefaults())
