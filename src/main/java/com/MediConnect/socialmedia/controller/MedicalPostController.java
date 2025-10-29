@@ -22,6 +22,7 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/posts")
 @RequiredArgsConstructor
+//todo: add delete comment for the commenter
 public class MedicalPostController {
 
     private final MedicalPostService medicalPostService;
@@ -39,7 +40,6 @@ public class MedicalPostController {
                 try {
                     userId = extractUserIdFromToken(token);
                 } catch (Exception e) {
-                    // If token extraction fails, just return posts without user-specific data
                     System.out.println("Failed to extract user ID from token: " + e.getMessage());
                 }
             }

@@ -1,23 +1,27 @@
 package com.MediConnect.EntryRelated.service.healthprovider.impl;
 
 import com.MediConnect.EntryRelated.dto.healthprovider.GetAllSpecialtyDTO;
+import com.MediConnect.EntryRelated.dto.healthprovider.LoginHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.entities.EducationHistory;
 import com.MediConnect.EntryRelated.entities.HealthcareProvider;
 import com.MediConnect.EntryRelated.entities.SpecializationType;
 import com.MediConnect.EntryRelated.entities.WorkExperience;
 import com.MediConnect.EntryRelated.repository.HealthcareProviderRepo;
+import com.MediConnect.EntryRelated.service.ActivityService;
+import com.MediConnect.EntryRelated.service.OTPService;
 import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
 import com.MediConnect.EntryRelated.service.healthprovider.mapper.HealthcareProviderMapper;
+import com.MediConnect.Service.UserService;
+import com.MediConnect.config.JWTService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -26,7 +30,10 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
     private final HealthcareProviderRepo providerRepo;
     private final HealthcareProviderMapper providerMapper;
     private final BCryptPasswordEncoder passwordEncoder;
-
+    private final UserService userService;
+    private final OTPService otpService;
+    private final JWTService jwtService;
+    private final ActivityService activityService;
     @Transactional
     public String register(SignupHPRequestDTO dto) {
         try {
@@ -122,6 +129,85 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
             e.printStackTrace();
             throw e;
         }
+    }
+
+    @Override
+    public Map<String, Object> loginProvider(LoginHPRequestDTO loginRequest, HttpServletRequest request) {
+        System.out.println("DEBUG LOGIN: Attempting login for username: '" + loginRequest.getUsername() + "'");
+
+        // 1. Verify the provider exists
+        HealthcareProvider provider = providerRepo.findByUsername(loginRequest.getUsername())
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+        System.out.println("DEBUG LOGIN: Found provider with role: '" + provider.getRole() + "'");
+
+        // 2. Check role
+        if (!"HEALTHPROVIDER".equals(provider.getRole())) {
+            throw new RuntimeException("Access denied: This account is not a healthcare provider account");
+        }
+
+        // 3. Authenticate credentials
+        userService.authenticate(loginRequest.getUsername(), loginRequest.getPassword());
+
+        // 4. Handle 2FA (OTP)
+        if (userService.isTwoFactorEnabled(loginRequest.getUsername())) {
+            otpService.sendLoginOTP(provider.getEmail());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "2fa_required");
+            response.put("message", "OTP sent to your email. Please verify to complete login.");
+            response.put("email", provider.getEmail());
+            response.put("username", loginRequest.getUsername());
+            response.put("userId", provider.getId());
+            return response;
+        }
+
+        // 5. Generate token
+        String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(provider));
+
+        // 6. Log session activity
+        activityService.createLoginSession(provider, token, request);
+
+        System.out.println("DEBUG LOGIN: Authentication successful, token generated");
+
+        // 7. Return success response
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "success");
+        response.put("message", "Healthcare provider login successful");
+        response.put("token", token);
+        response.put("userId", provider.getId());
+        return response;
+    }
+
+    @Override
+    public Map<String, Object> verifyLoginOTP(Map<String, String> request, HttpServletRequest httpRequest) {
+        String username = request.get("username");
+        String otp = request.get("otp");
+
+        HealthcareProvider provider = providerRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+        // Verify OTP
+        if (!otpService.verifyLoginOTP(provider.getEmail(), otp)) {
+            throw new RuntimeException("Invalid or expired OTP");
+        }
+
+        // Clear the OTP
+        otpService.clearLoginOTP(provider.getEmail());
+
+        // Generate token
+        String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(provider));
+
+        // Create login session and log activity
+        activityService.createLoginSession(provider, token, httpRequest);
+
+        // Prepare response
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "success");
+        response.put("message", "Login successful");
+        response.put("token", token);
+        response.put("userId", provider.getId());
+        return response;
     }
 
     @Override
@@ -234,4 +320,50 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
             })
             .collect(java.util.stream.Collectors.toList());
     }
+    @Override
+    public Map<String, Object> getProviderProfileByUsername(String username) {
+        HealthcareProvider provider = providerRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+        Map<String, Object> profile = new HashMap<>();
+        profile.put("id", provider.getId());
+        profile.put("firstName", provider.getFirstName());
+        profile.put("lastName", provider.getLastName());
+        profile.put("email", provider.getEmail());
+        profile.put("city", provider.getCity());
+        profile.put("specializations", provider.getSpecializations());
+        profile.put("insuranceAccepted", provider.getInsuranceAccepted());
+        profile.put("consultationFee", provider.getConsultationFee());
+        profile.put("dateOfBirth", provider.getDateOfBirth());
+        profile.put("role", provider.getRole());
+        return profile;
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> updateProviderProfileByUsername(String username, HealthcareProvider updatedData) {
+        HealthcareProvider provider = providerRepo.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+        if (updatedData.getFirstName() != null)
+            provider.setFirstName(updatedData.getFirstName());
+        if (updatedData.getLastName() != null)
+            provider.setLastName(updatedData.getLastName());
+        if (updatedData.getCity() != null)
+            provider.setCity(updatedData.getCity());
+        if (updatedData.getConsultationFee() != null)
+            provider.setConsultationFee(updatedData.getConsultationFee());
+        if (updatedData.getInsuranceAccepted() != null)
+            provider.setInsuranceAccepted(updatedData.getInsuranceAccepted());
+        if (updatedData.getSpecializations() != null)
+            provider.setSpecializations(updatedData.getSpecializations());
+
+        providerRepo.save(provider);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("message", "Provider profile updated successfully");
+        response.put("updatedProvider", provider);
+        return response;
+    }
+
 }

@@ -57,6 +57,8 @@ public class JWTService {
         return claimsResolver.apply(claims);
     }
 
+    //todo:why multiple entries?
+    //todo: why is network now showing applied api endpoint when pressed?
     private Claims extractAllClaims(String token) {
         return Jwts.parser()
                 .verifyWith(getKey())

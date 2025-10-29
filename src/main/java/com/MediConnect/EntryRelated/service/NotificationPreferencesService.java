@@ -4,10 +4,14 @@ import com.MediConnect.EntryRelated.dto.NotificationPreferencesDTO;
 import com.MediConnect.EntryRelated.entities.UserNotificationPreferences;
 import com.MediConnect.EntryRelated.entities.Users;
 import com.MediConnect.EntryRelated.repository.UserNotificationPreferencesRepository;
+import com.MediConnect.Repos.UserRepo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -15,7 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class NotificationPreferencesService {
     
     private final UserNotificationPreferencesRepository preferencesRepository;
-    
+    private final UserRepo userRepository;
+
     /**
      * Get notification preferences for a user, creating default preferences if none exist
      */
@@ -101,5 +106,25 @@ public class NotificationPreferencesService {
         dto.setMaintenanceAlerts(preferences.getMaintenanceAlerts());
         
         return dto;
+    }
+    public Map<String, Object> getNotificationPreferencesByUsername(String username) {
+        Users user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "success");
+        response.put("preferences", getNotificationPreferences(user));
+        return response;
+    }
+
+    public Map<String, Object> updateNotificationPreferencesByUsername(String username, NotificationPreferencesDTO dto) {
+        Users user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", "success");
+        response.put("message", "Notification preferences updated successfully");
+        response.put("preferences", updateNotificationPreferences(user, dto));
+        return response;
     }
 }

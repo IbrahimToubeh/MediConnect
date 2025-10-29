@@ -6,6 +6,7 @@ import com.MediConnect.EntryRelated.repository.HealthcareProviderRepo;
 import com.MediConnect.EntryRelated.repository.PatientRepo;
 import com.MediConnect.config.JWTService;
 import com.MediConnect.socialmedia.service.NotificationService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,21 +20,19 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/notifications")
 @CrossOrigin(origins = "*")
+@RequiredArgsConstructor
 public class NotificationController {
+
     
-    @Autowired
-    private NotificationService notificationService;
+    private final NotificationService notificationService;
     
-    @Autowired
-    private JWTService jwtService;
+    private final JWTService jwtService;
     
-    @Autowired
-    private HealthcareProviderRepo healthcareProviderRepo;
+    private final HealthcareProviderRepo healthcareProviderRepo;
     
-    @Autowired
-    private PatientRepo patientRepo;
-    
-    // Get all notifications for the authenticated user
+    private final PatientRepo patientRepo;
+
+
     @GetMapping
     public ResponseEntity<?> getUserNotifications(@RequestHeader("Authorization") String authHeader) {
         try {

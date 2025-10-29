@@ -45,103 +45,37 @@ public class HealthProviderController {
     private final NotificationPreferencesService notificationPreferencesService;
     private final PrivacySettingsService privacySettingsService;
 
+
     @PostMapping("/login")
-    public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginHPRequestDTO healthProviderInfo, HttpServletRequest request) {
+    public ResponseEntity<Map<String, Object>> login(
+            @Valid @RequestBody LoginHPRequestDTO loginRequest,
+            HttpServletRequest request) {
         try {
-            System.out.println("DEBUG LOGIN: Attempting login for username: '" + healthProviderInfo.getUsername() + "'");
-            
-            // First verify the user is a healthcare provider before authentication
-            HealthcareProvider provider = healthcareProviderService.findByUsername(healthProviderInfo.getUsername())
-                    .orElseThrow(() -> {
-                        System.out.println("ERROR LOGIN: Healthcare provider not found for username: '" + healthProviderInfo.getUsername() + "'");
-                        return new RuntimeException("Healthcare provider not found");
-                    });
-            
-            System.out.println("DEBUG LOGIN: Found provider with role: '" + provider.getRole() + "'");
-            
-            // Verify the user has HEALTHPROVIDER role
-            if (!"HEALTHPROVIDER".equals(provider.getRole())) {
-                System.out.println("ERROR LOGIN: Wrong role. Expected 'HEALTHPROVIDER', got: '" + provider.getRole() + "'");
-                throw new RuntimeException("Access denied: This account is not a healthcare provider account");
-            }
-            
-            System.out.println("DEBUG LOGIN: Attempting authentication with Spring Security");
-            // Authenticate the user (verify username/password)
-            userService.authenticate(healthProviderInfo.getUsername(), healthProviderInfo.getPassword());
-            
-            // Check if 2FA is enabled
-            if (userService.isTwoFactorEnabled(healthProviderInfo.getUsername())) {
-                // Send OTP to email
-                otpService.sendLoginOTP(provider.getEmail());
-                
-                Map<String, Object> response = new HashMap<>();
-                response.put("status", "2fa_required");
-                response.put("message", "OTP sent to your email. Please verify to complete login.");
-                response.put("email", provider.getEmail());
-                response.put("username", healthProviderInfo.getUsername());
-                response.put("userId", provider.getId());
-                return ResponseEntity.ok(response);
-            }
-            
-            // If 2FA not enabled, generate token immediately
-            String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(provider));
-            
-            // Create login session and log activity
-            activityService.createLoginSession(provider, token, request);
-            
-            System.out.println("DEBUG LOGIN: Authentication successful, token generated");
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "success");
-            response.put("message", "Healthcare provider login successful");
-            response.put("token", token);
-            response.put("userId", provider.getId());
+            Map<String, Object> response = healthcareProviderService.loginProvider(loginRequest, request);
             return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            System.out.println("ERROR LOGIN: Exception during login: " + e.getMessage());
-            e.printStackTrace();
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "error");
-            response.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        } catch (RuntimeException e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
     }
 
     @PostMapping("/verify-login-otp")
-    public ResponseEntity<Map<String, Object>> verifyLoginOTP(@RequestBody Map<String, String> request, HttpServletRequest httpRequest) {
+    public ResponseEntity<Map<String, Object>> verifyLoginOTP(
+            @RequestBody Map<String, String> request,
+            HttpServletRequest httpRequest) {
         try {
-            String username = request.get("username");
-            String otp = request.get("otp");
-            
-            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
-                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
-            
-            // Verify OTP
-            if (!otpService.verifyLoginOTP(provider.getEmail(), otp)) {
-                throw new RuntimeException("Invalid or expired OTP");
-            }
-            
-            // Clear the OTP
-            otpService.clearLoginOTP(provider.getEmail());
-            
-            // Generate token
-            String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(provider));
-            
-            // Create login session and log activity
-            activityService.createLoginSession(provider, token, httpRequest);
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "success");
-            response.put("message", "Login successful");
-            response.put("token", token);
-            response.put("userId", provider.getId());
+            Map<String, Object> response = healthcareProviderService.verifyLoginOTP(request, httpRequest);
             return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "error");
-            response.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        } catch (RuntimeException e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
     }
+
 
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(@Valid @RequestBody SignupHPRequestDTO healthProviderInfo) {
@@ -807,4 +741,105 @@ public class HealthProviderController {
         
         return profile;
     }
+    /*
+    @PostMapping("/login")
+    public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginHPRequestDTO healthProviderInfo, HttpServletRequest request) {
+        try {
+            System.out.println("DEBUG LOGIN: Attempting login for username: '" + healthProviderInfo.getUsername() + "'");
+
+            // First verify the user is a healthcare provider before authentication
+            HealthcareProvider provider = healthcareProviderService.findByUsername(healthProviderInfo.getUsername())
+                    .orElseThrow(() -> {
+                        System.out.println("ERROR LOGIN: Healthcare provider not found for username: '" + healthProviderInfo.getUsername() + "'");
+                        return new RuntimeException("Healthcare provider not found");
+                    });
+
+            System.out.println("DEBUG LOGIN: Found provider with role: '" + provider.getRole() + "'");
+
+            // Verify the user has HEALTHPROVIDER role
+            if (!"HEALTHPROVIDER".equals(provider.getRole())) {
+                System.out.println("ERROR LOGIN: Wrong role. Expected 'HEALTHPROVIDER', got: '" + provider.getRole() + "'");
+                throw new RuntimeException("Access denied: This account is not a healthcare provider account");
+            }
+
+            System.out.println("DEBUG LOGIN: Attempting authentication with Spring Security");
+            // Authenticate the user (verify username/password)
+            userService.authenticate(healthProviderInfo.getUsername(), healthProviderInfo.getPassword());
+
+            // Check if 2FA is enabled
+            if (userService.isTwoFactorEnabled(healthProviderInfo.getUsername())) {
+                // Send OTP to email
+                otpService.sendLoginOTP(provider.getEmail());
+
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "2fa_required");
+                response.put("message", "OTP sent to your email. Please verify to complete login.");
+                response.put("email", provider.getEmail());
+                response.put("username", healthProviderInfo.getUsername());
+                response.put("userId", provider.getId());
+                return ResponseEntity.ok(response);
+            }
+
+            // If 2FA not enabled, generate token immediately
+            String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(provider));
+
+            // Create login session and log activity
+            activityService.createLoginSession(provider, token, request);
+
+            System.out.println("DEBUG LOGIN: Authentication successful, token generated");
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Healthcare provider login successful");
+            response.put("token", token);
+            response.put("userId", provider.getId());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.out.println("ERROR LOGIN: Exception during login: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+    }
+
+     */
+    /*
+    @PostMapping("/verify-login-otp")
+    public ResponseEntity<Map<String, Object>> verifyLoginOTP(@RequestBody Map<String, String> request, HttpServletRequest httpRequest) {
+        try {
+            String username = request.get("username");
+            String otp = request.get("otp");
+
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            // Verify OTP
+            if (!otpService.verifyLoginOTP(provider.getEmail(), otp)) {
+                throw new RuntimeException("Invalid or expired OTP");
+            }
+
+            // Clear the OTP
+            otpService.clearLoginOTP(provider.getEmail());
+
+            // Generate token
+            String token = jwtService.generateToken(new com.MediConnect.config.UserPrincipal(provider));
+
+            // Create login session and log activity
+            activityService.createLoginSession(provider, token, httpRequest);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Login successful");
+            response.put("token", token);
+            response.put("userId", provider.getId());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+    }
+     */
 }

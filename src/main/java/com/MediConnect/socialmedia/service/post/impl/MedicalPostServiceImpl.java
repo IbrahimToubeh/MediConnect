@@ -14,6 +14,7 @@ import com.MediConnect.socialmedia.repository.MedicalPostLikeRepository;
 import com.MediConnect.socialmedia.service.NotificationService;
 import com.MediConnect.socialmedia.service.post.MedicalPostService;
 import com.MediConnect.socialmedia.service.post.mapper.PostMapStructRelated;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -170,6 +171,7 @@ public class MedicalPostServiceImpl implements MedicalPostService {
 
     @Override
     @Transactional
+    //todo: change this to cache system using redis
     public boolean likePost(Long postId, Long userId) {
         System.out.println("\n=== LIKE/UNLIKE POST REQUEST ===");
         System.out.println("Post ID: " + postId);
@@ -241,19 +243,14 @@ public class MedicalPostServiceImpl implements MedicalPostService {
 
     @Override
     public void deletePost(Long postId, Long userId) {
-        Optional<MedicalPost> postOpt = medicalPostRepository.findById(postId);
-        if (postOpt.isPresent()) {
-            MedicalPost post = postOpt.get();
-            
+        MedicalPost post = medicalPostRepository.findById(postId)
+                .orElseThrow(() -> new EntityNotFoundException("Post not found with id: " + postId));
             // Check if the user is the owner of the post
             if (post.getPostProvider() != null && Objects.equals(post.getPostProvider().getId(), userId)) {
                 medicalPostRepository.delete(post);
             } else {
                 throw new RuntimeException("You can only delete your own posts");
             }
-        } else {
-            throw new RuntimeException("Post not found");
-        }
     }
 
     @Override

@@ -14,6 +14,8 @@ public class PatientProfileResponseDTO {
     private String email;
     private String firstName;
     private String lastName;
+    private String fullName;
+
     private String gender;
     private Date dateOfBirth;
     private String phoneNumber;
