@@ -191,6 +191,93 @@ public class NotificationService {
         notificationRepository.deleteById(notificationId);
     }
     
+    // Create notification when patient books an appointment
+    public void createAppointmentRequestedNotification(Users patient, Users doctor, Long appointmentId) {
+        // Check if the recipient (doctor) has appointment reminders enabled
+        if (!notificationPreferencesService.isNotificationEnabled(doctor, "appointment_reminders")) {
+            return;
+        }
+        
+        Notification notification = new Notification();
+        notification.setRecipient(doctor);
+        notification.setActor(patient);
+        notification.setType(NotificationType.APPOINTMENT_REQUESTED);
+        notification.setRelatedEntityId(appointmentId);
+        notification.setMessage(patient.getFirstName() + " " + patient.getLastName() + " requested an appointment with you");
+        notification.setIsRead(false);
+        notification.setCreatedAt(LocalDateTime.now());
+        
+        notificationRepository.save(notification);
+    }
+    
+    // Create notification when doctor confirms/cancels/reschedules appointment
+    public void createAppointmentStatusNotification(Users doctor, Users patient, NotificationType notificationType, Long appointmentId, String additionalInfo) {
+        // Check if the recipient (patient) has appointment reminders enabled
+        if (!notificationPreferencesService.isNotificationEnabled(patient, "appointment_reminders")) {
+            return;
+        }
+        
+        String message = "";
+        switch (notificationType) {
+            case APPOINTMENT_CONFIRMED:
+                message = "Dr. " + doctor.getFirstName() + " " + doctor.getLastName() + " confirmed your appointment";
+                break;
+            case APPOINTMENT_CANCELLED:
+                message = "Dr. " + doctor.getFirstName() + " " + doctor.getLastName() + " cancelled your appointment";
+                break;
+            case APPOINTMENT_RESCHEDULED:
+                message = "Dr. " + doctor.getFirstName() + " " + doctor.getLastName() + " rescheduled your appointment";
+                if (additionalInfo != null && !additionalInfo.isEmpty()) {
+                    message += ": " + additionalInfo;
+                }
+                break;
+            default:
+                return; // Invalid notification type
+        }
+        
+        Notification notification = new Notification();
+        notification.setRecipient(patient);
+        notification.setActor(doctor);
+        notification.setType(notificationType);
+        notification.setRelatedEntityId(appointmentId);
+        notification.setMessage(message);
+        notification.setIsRead(false);
+        notification.setCreatedAt(LocalDateTime.now());
+        
+        notificationRepository.save(notification);
+    }
+    
+    // Create notification when patient responds to reschedule request
+    public void createRescheduleResponseNotification(Users patient, Users doctor, NotificationType notificationType, Long appointmentId) {
+        // Check if the recipient (doctor) has appointment reminders enabled
+        if (!notificationPreferencesService.isNotificationEnabled(doctor, "appointment_reminders")) {
+            return;
+        }
+        
+        String message = "";
+        switch (notificationType) {
+            case APPOINTMENT_RESCHEDULE_CONFIRMED:
+                message = patient.getFirstName() + " " + patient.getLastName() + " accepted the new appointment time";
+                break;
+            case APPOINTMENT_RESCHEDULE_CANCELLED:
+                message = patient.getFirstName() + " " + patient.getLastName() + " rejected the rescheduled appointment time. The appointment has been cancelled";
+                break;
+            default:
+                return; // Invalid notification type
+        }
+        
+        Notification notification = new Notification();
+        notification.setRecipient(doctor);
+        notification.setActor(patient);
+        notification.setType(notificationType);
+        notification.setRelatedEntityId(appointmentId);
+        notification.setMessage(message);
+        notification.setIsRead(false);
+        notification.setCreatedAt(LocalDateTime.now());
+        
+        notificationRepository.save(notification);
+    }
+    
     // Helper method to convert notification to map
     private Map<String, Object> convertToMap(Notification notification) {
         Map<String, Object> map = new HashMap<>();

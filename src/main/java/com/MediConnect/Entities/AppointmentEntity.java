@@ -28,7 +28,7 @@ public class AppointmentEntity {
     private Date appointmentDateTime;
 
     @Enumerated(EnumType.STRING)
-    private AppointmentStatus status = AppointmentStatus.SCHEDULED;
+    private AppointmentStatus status = AppointmentStatus.PENDING;
 
     @Enumerated(EnumType.STRING)
     private AppointmentType type;
@@ -40,6 +40,9 @@ public class AppointmentEntity {
     private String notes;
 
     private Integer durationMinutes = 30;
+
+    @Column(name = "share_medical_records", nullable = false)
+    private Boolean shareMedicalRecords = false;
 
     @Temporal(TemporalType.TIMESTAMP)
     private Date createdAt;
