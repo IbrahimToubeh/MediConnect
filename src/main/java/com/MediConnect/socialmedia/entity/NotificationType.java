@@ -7,13 +7,15 @@ public enum NotificationType {
     COMMENT_REPLY,       // Someone replied to your comment
     POST_SHARE,          // Someone shared your post (future)
     
-    // Appointment-related notifications
-    APPOINTMENT_REQUESTED,           // Appointment request sent
-    APPOINTMENT_CONFIRMED,           // Appointment confirmed by doctor
-    APPOINTMENT_CANCELLED,           // Appointment cancelled
-    APPOINTMENT_RESCHEDULED,         // Appointment rescheduled
-    APPOINTMENT_RESCHEDULE_CONFIRMED, // Reschedule request confirmed
-    APPOINTMENT_RESCHEDULE_CANCELLED  // Reschedule request cancelled
+    // ===== APPOINTMENT-RELATED NOTIFICATIONS =====
+    // These notification types are used for the appointment booking and management workflow
+    
+    APPOINTMENT_REQUESTED,           // Sent to doctor when patient books an appointment
+    APPOINTMENT_CONFIRMED,           // Sent to patient when doctor confirms appointment
+    APPOINTMENT_CANCELLED,           // Sent to patient when doctor cancels appointment
+    APPOINTMENT_RESCHEDULED,         // Sent to patient when doctor reschedules appointment (includes new time)
+    APPOINTMENT_RESCHEDULE_CONFIRMED, // Sent to doctor when patient accepts rescheduled time
+    APPOINTMENT_RESCHEDULE_CANCELLED  // Sent to doctor when patient rejects rescheduled time (appointment cancelled)
 }
 
 

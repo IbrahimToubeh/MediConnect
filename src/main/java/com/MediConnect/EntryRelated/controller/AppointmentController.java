@@ -10,6 +10,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Appointment REST Controller
+ * 
+ * Endpoints for appointment management:
+ * - POST /appointments/book - Patient books an appointment (triggers notification to doctor)
+ * - GET /appointments/patient - Get patient's appointments
+ * - GET /appointments/doctor - Get doctor's appointments (includes insurance & medical records if shared)
+ * - PUT /appointments/{id}/status - Doctor updates appointment status (triggers notification to patient)
+ * - PUT /appointments/{id}/respond-reschedule - Patient responds to reschedule (triggers notification to doctor)
+ */
 @RestController
 @RequestMapping("/appointments")
 @RequiredArgsConstructor
@@ -17,6 +27,11 @@ public class AppointmentController {
 
     private final AppointmentService appointmentService;
 
+    /**
+     * Endpoint for patients to book appointments.
+     * Requires: Authorization header with Bearer token
+     * Request body: { doctorId, appointmentDateTime, description, shareMedicalRecords }
+     */
     @PostMapping("/book")
     public ResponseEntity<Map<String, Object>> bookAppointment(
             @RequestBody Map<String, Object> request,
@@ -91,6 +106,15 @@ public class AppointmentController {
         }
     }
 
+    /**
+     * Endpoint for doctors to update appointment status (confirm, cancel, or reschedule).
+     * When called, automatically sends notification to the patient.
+     * 
+     * Status values: "CONFIRMED", "CANCELLED", or "RESCHEDULED"
+     * If status is "RESCHEDULED", newAppointmentDateTime must be provided with the new time.
+     * 
+     * Request body: { status, doctorNotes (optional), newAppointmentDateTime (required if rescheduling) }
+     */
     @PutMapping("/{id}/status")
     public ResponseEntity<Map<String, Object>> updateAppointmentStatus(
             @PathVariable("id") Long id,
@@ -105,6 +129,8 @@ public class AppointmentController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
             }
 
+            // Extract status and optional parameters
+            // newAppointmentDateTime is required when status is "RESCHEDULED"
             String status = body.get("status") != null ? body.get("status").toString() : "";
             String note = body.get("doctorNotes") != null ? body.get("doctorNotes").toString() : 
                          (body.get("note") != null ? body.get("note").toString() : null);
@@ -123,6 +149,13 @@ public class AppointmentController {
         }
     }
 
+    /**
+     * Endpoint for patients to respond to a reschedule request from the doctor.
+     * When called, automatically sends notification to the doctor about the response.
+     * 
+     * Action values: "confirm" (accept new time) or "cancel" (reject and cancel appointment)
+     * Only works if appointment status is currently RESCHEDULED.
+     */
     @PutMapping("/{id}/respond-reschedule")
     public ResponseEntity<Map<String, Object>> respondToReschedule(
             @PathVariable("id") Long id,

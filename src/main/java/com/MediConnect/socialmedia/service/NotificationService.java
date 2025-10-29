@@ -191,7 +191,16 @@ public class NotificationService {
         notificationRepository.deleteById(notificationId);
     }
     
-    // Create notification when patient books an appointment
+    /**
+     * NOTIFICATION: Patient Books Appointment → Doctor Gets Notification
+     * 
+     * Called automatically when a patient books an appointment.
+     * Creates an APPOINTMENT_REQUESTED notification for the doctor.
+     * 
+     * @param patient The patient who booked the appointment (actor)
+     * @param doctor The doctor who will receive the notification (recipient)
+     * @param appointmentId The ID of the newly created appointment
+     */
     public void createAppointmentRequestedNotification(Users patient, Users doctor, Long appointmentId) {
         // Check if the recipient (doctor) has appointment reminders enabled
         if (!notificationPreferencesService.isNotificationEnabled(doctor, "appointment_reminders")) {
@@ -210,7 +219,21 @@ public class NotificationService {
         notificationRepository.save(notification);
     }
     
-    // Create notification when doctor confirms/cancels/reschedules appointment
+    /**
+     * NOTIFICATION: Doctor Updates Appointment Status → Patient Gets Notification
+     * 
+     * Called automatically when a doctor confirms, cancels, or reschedules an appointment.
+     * Creates the appropriate notification type for the patient:
+     * - APPOINTMENT_CONFIRMED: Doctor confirmed the appointment
+     * - APPOINTMENT_CANCELLED: Doctor cancelled the appointment
+     * - APPOINTMENT_RESCHEDULED: Doctor rescheduled (includes new date/time in message)
+     * 
+     * @param doctor The doctor who took the action (actor)
+     * @param patient The patient who will receive the notification (recipient)
+     * @param notificationType Type of notification (CONFIRMED, CANCELLED, or RESCHEDULED)
+     * @param appointmentId The ID of the appointment being updated
+     * @param additionalInfo Optional info (typically new date/time when rescheduling)
+     */
     public void createAppointmentStatusNotification(Users doctor, Users patient, NotificationType notificationType, Long appointmentId, String additionalInfo) {
         // Check if the recipient (patient) has appointment reminders enabled
         if (!notificationPreferencesService.isNotificationEnabled(patient, "appointment_reminders")) {
@@ -247,13 +270,28 @@ public class NotificationService {
         notificationRepository.save(notification);
     }
     
-    // Create notification when patient responds to reschedule request
+    /**
+     * NOTIFICATION: Patient Responds to Reschedule → Doctor Gets Notification
+     * 
+     * Called automatically when a patient responds to a reschedule request.
+     * This completes the rescheduling workflow notification cycle:
+     * 1. Doctor reschedules → Patient gets APPOINTMENT_RESCHEDULED notification
+     * 2. Patient responds → Doctor gets this notification:
+     *    - APPOINTMENT_RESCHEDULE_CONFIRMED: Patient accepted the new time
+     *    - APPOINTMENT_RESCHEDULE_CANCELLED: Patient rejected the new time, appointment cancelled
+     * 
+     * @param patient The patient who responded (actor)
+     * @param doctor The doctor who will receive the notification (recipient)
+     * @param notificationType Either APPOINTMENT_RESCHEDULE_CONFIRMED or APPOINTMENT_RESCHEDULE_CANCELLED
+     * @param appointmentId The ID of the appointment
+     */
     public void createRescheduleResponseNotification(Users patient, Users doctor, NotificationType notificationType, Long appointmentId) {
         // Check if the recipient (doctor) has appointment reminders enabled
         if (!notificationPreferencesService.isNotificationEnabled(doctor, "appointment_reminders")) {
             return;
         }
         
+        // Build message based on patient's response
         String message = "";
         switch (notificationType) {
             case APPOINTMENT_RESCHEDULE_CONFIRMED:

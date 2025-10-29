@@ -20,6 +20,22 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
 
+/**
+ * Appointment Service Implementation
+ * 
+ * Handles appointment booking, retrieval, and status updates with integrated notification system.
+ * 
+ * NOTIFICATION WORKFLOW:
+ * 1. Patient books → Doctor gets APPOINTMENT_REQUESTED notification
+ * 2. Doctor confirms/cancels/reschedules → Patient gets status change notification
+ * 3. Patient responds to reschedule → Doctor gets response notification
+ * 
+ * MEDICAL RECORDS SHARING:
+ * - Controlled by shareMedicalRecords field set during booking
+ * - If true: Doctor can see allergies, conditions, surgeries
+ * - If false: Medical records hidden for privacy
+ * - Insurance info is ALWAYS visible to doctors (billing purposes)
+ */
 @Service
 @RequiredArgsConstructor
 public class AppointmentServiceImpl implements AppointmentService {
@@ -28,7 +44,7 @@ public class AppointmentServiceImpl implements AppointmentService {
     private final PatientRepo patientRepo;
     private final HealthcareProviderRepo healthcareProviderRepo;
     private final JWTService jwtService;
-    private final NotificationService notificationService;
+    private final NotificationService notificationService; // Used for automatic appointment notifications
 
     @Override
     public Map<String, Object> bookAppointment(String token, Map<String, Object> request) {
@@ -89,7 +105,11 @@ public class AppointmentServiceImpl implements AppointmentService {
             appointment.setType(AppointmentType.CONSULTATION); // Default type
             appointment.setReason(request.get("description") != null ? request.get("description").toString() : "");
             
-            // Set shareMedicalRecords - default to false if not provided
+            // MEDICAL RECORDS SHARING FEATURE:
+            // The shareMedicalRecords field controls whether the doctor can see the patient's medical history
+            // - If true: Doctor can see allergies, medical conditions, and previous surgeries
+            // - If false: Doctor cannot see medical records (privacy protection)
+            // Defaults to false for privacy if not specified
             Boolean shareMedicalRecords = false;
             if (request.get("shareMedicalRecords") != null) {
                 Object shareValue = request.get("shareMedicalRecords");
@@ -103,11 +123,13 @@ public class AppointmentServiceImpl implements AppointmentService {
 
             appointment = appointmentRepository.save(appointment);
 
-            // Notify doctor about new appointment request
+            // NOTIFICATION: Automatically notify the doctor when a patient books an appointment
+            // This creates an APPOINTMENT_REQUESTED notification that appears in the doctor's notification list
+            // Notification is wrapped in try-catch to ensure appointment booking succeeds even if notification fails
             try {
                 notificationService.createAppointmentRequestedNotification(patient, doctor, (long) appointment.getId());
             } catch (Exception e) {
-                // Log but don't fail the appointment booking if notification fails
+                // Log but don't fail the appointment booking艳notification fails
                 System.err.println("Failed to create appointment notification: " + e.getMessage());
             }
 
@@ -292,18 +314,23 @@ public class AppointmentServiceImpl implements AppointmentService {
                 throw new RuntimeException("You are not allowed to modify this appointment");
             }
 
+            // Update appointment status (allowed values: CONFIRMED, CANCELLED, RESCHEDULED)
             AppointmentStatus newStatus = AppointmentStatus.valueOf(status.toUpperCase());
             apt.setStatus(newStatus);
             
-            // If rescheduling, update the appointment date/time
+            // RESCHEDULING LOGIC: If doctor is rescheduling, update the appointment date/time
+            // The newDateTime parameter contains the new appointment time in ISO format
+            // When status is RESCHEDULED, the patient will need to confirm the new time via respondToReschedule()
             if ("RESCHEDULED".equals(status) && newDateTime != null && !newDateTime.isEmpty()) {
                 try {
+                    // Parse the new date/time for the rescheduled appointment
                     String cleanedDateTime = newDateTime.replace("Z", "").replace("z", "");
                     LocalDateTime localDateTime = LocalDateTime.parse(cleanedDateTime);
                     Date appointmentDate = Date.from(localDateTime.atZone(ZoneId.systemDefault()).toInstant());
                     apt.setAppointmentDateTime(appointmentDate);
                 } catch (Exception e) {
                     try {
+                        // Fallback parsing if ISO format fails
                         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
                         apt.setAppointmentDateTime(sdf.parse(newDateTime));
                     } catch (Exception e2) {
@@ -312,24 +339,30 @@ public class AppointmentServiceImpl implements AppointmentService {
                 }
             }
             
+            // Save optional doctor notes (e.g., cancellation reason, confirmation message)
             if (note != null && !note.isBlank()) {
                 apt.setNotes(note);
             }
 
             appointmentRepository.save(apt);
 
-            // Notify patient about appointment status change
+            // NOTIFICATION: Automatically notify patient when doctor changes appointment status
+            // This creates different notification types based on the action:
+            // - CONFIRMED → APPOINTMENT_CONFIRMED notification (appointment is confirmed)
+            // - CANCELLED → APPOINTMENT_CANCELLED notification (appointment is cancelled)
+            // - RESCHEDULED → APPOINTMENT_RESCHEDULED notification (includes new date/time in message)
             try {
                 NotificationType notificationType = null;
                 String additionalInfo = null;
                 
+                // Map status to appropriate notification type
                 if ("CONFIRMED".equals(status)) {
                     notificationType = NotificationType.APPOINTMENT_CONFIRMED;
                 } else if ("CANCELLED".equals(status)) {
                     notificationType = NotificationType.APPOINTMENT_CANCELLED;
                 } else if ("RESCHEDULED".equals(status)) {
                     notificationType = NotificationType.APPOINTMENT_RESCHEDULED;
-                    // Include new date/time in notification if available
+                    // Include new date/time in notification message for better UX
                     if (apt.getAppointmentDateTime() != null) {
                         SimpleDateFormat dateFormat = new SimpleDateFormat("MMM dd, yyyy 'at' HH:mm");
                         additionalInfo = "New time: " + dateFormat.format(apt.getAppointmentDateTime());
@@ -377,10 +410,15 @@ public class AppointmentServiceImpl implements AppointmentService {
                 throw new RuntimeException("You are not allowed to modify this appointment");
             }
 
+            // VALIDATION: Only allow patient to respond if appointment is in RESCHEDULED status
+            // This ensures the workflow: Doctor reschedules → Status = RESCHEDULED → Patient responds
             if (!apt.getStatus().equals(AppointmentStatus.RESCHEDULED)) {
                 throw new RuntimeException("Appointment is not in rescheduled status");
             }
 
+            // Update status based on patient's response to reschedule:
+            // - "confirm" → Patient accepts the new time, status becomes CONFIRMED
+            // - "cancel" → Patient rejects the new time, appointment is CANCELLED
             if ("confirm".equalsIgnoreCase(action)) {
                 apt.setStatus(AppointmentStatus.CONFIRMED);
             } else if ("cancel".equalsIgnoreCase(action)) {
@@ -391,7 +429,12 @@ public class AppointmentServiceImpl implements AppointmentService {
 
             appointmentRepository.save(apt);
 
-            // Notify doctor about patient's response to reschedule
+            // NOTIFICATION: Automatically notify doctor when patient responds to reschedule request
+            // This completes the rescheduling workflow notification cycle:
+            // 1. Doctor reschedules → Patient gets APPOINTMENT_RESCHEDULED notification
+            // 2. Patient responds → Doctor gets notification about the response:
+            //    - APPOINTMENT_RESCHEDULE_CONFIRMED (patient accepted new time)
+            //    - APPOINTMENT_RESCHEDULE_CANCELLED (patient rejected new time, appointment cancelled)
             try {
                 NotificationType notificationType = null;
                 if ("confirm".equalsIgnoreCase(action)) {
