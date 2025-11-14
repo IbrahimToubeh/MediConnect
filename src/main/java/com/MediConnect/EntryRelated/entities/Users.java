@@ -58,4 +58,8 @@ public class Users {
     
     @Column(name = "two_factor_enabled")
     private Boolean twoFactorEnabled = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_status", nullable = false)
+    private AccountStatus accountStatus = AccountStatus.ACTIVE;
 }

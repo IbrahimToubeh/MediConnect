@@ -12,5 +12,6 @@ public class BookAppointmentRequestDTO {
     private String appointmentDateTime; // ISO date-time string
     private String description;
     private Boolean shareMedicalRecords = false;
+    private Boolean isVideoCall = false; // Video call option (only for psychiatry doctors)
 }
 

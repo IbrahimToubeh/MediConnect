@@ -1,8 +1,10 @@
 package com.MediConnect.Service;
 
+import com.MediConnect.EntryRelated.entities.AccountStatus;
 import com.MediConnect.EntryRelated.entities.Users;
 import com.MediConnect.Repos.UserRepo;
 import com.MediConnect.config.JWTService;
+import com.MediConnect.EntryRelated.exception.AccountStatusException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -21,6 +23,22 @@ public class UserService {
     private final AuthenticationManager authManager;
 
     public String authenticate(String username, String password) {
+        userRepo.findByUsername(username).ifPresent(user -> {
+            AccountStatus status = user.getAccountStatus();
+            if (status == AccountStatus.PENDING) {
+                throw new AccountStatusException(status, "Your account is pending verification. An administrator will review your details shortly.");
+            }
+            if (status == AccountStatus.REJECTED) {
+                throw new AccountStatusException(status, "Your registration was rejected. Please contact support if you believe this is an error.");
+            }
+            if (status == AccountStatus.ON_HOLD) {
+                throw new AccountStatusException(status, "Your account is currently on hold. Please contact support for assistance.");
+            }
+            if (status == AccountStatus.BANNED) {
+                throw new AccountStatusException(status, "Your account has been permanently banned. Please contact support if you believe this is an error.");
+            }
+        });
+
         Authentication auth = authManager.authenticate(
                 new UsernamePasswordAuthenticationToken(username, password)
         );

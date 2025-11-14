@@ -17,6 +17,7 @@ import com.MediConnect.EntryRelated.service.patient.PatientService;
 import com.MediConnect.EntryRelated.service.patient.mapper.LaboratoryResultMapper;
 import com.MediConnect.EntryRelated.service.patient.mapper.PatientMapper;
 import com.MediConnect.Service.UserService;
+import com.MediConnect.EntryRelated.exception.AccountStatusException;
 import com.MediConnect.config.JWTService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -80,7 +81,11 @@ public class PatientServiceImpl implements PatientService {
         }
 
         // 3️⃣ Authenticate username/password
-        userService.authenticate(patientInfo.getUsername(), patientInfo.getPassword());
+        try {
+            userService.authenticate(patientInfo.getUsername(), patientInfo.getPassword());
+        } catch (AccountStatusException ex) {
+            throw new RuntimeException(ex.getMessage());
+        }
 
         Map<String, Object> response = new HashMap<>();
 

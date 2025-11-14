@@ -36,12 +36,37 @@ public interface AppointmentService {
      * Doctor updates appointment status (CONFIRMED, CANCELLED, or RESCHEDULED).
      * Automatically notifies the patient about the status change.
      */
-    Map<String, Object> updateAppointmentStatus(String token, Long appointmentId, String status, String note, String newDateTime);
-    
+    Map<String, Object> updateAppointmentStatus(String token, Integer appointmentId, String status, String note, String newDateTime);
+
     /**
      * Patient responds to a reschedule request from doctor (accepts or rejects new time).
      * Automatically notifies the doctor about the patient's response.
      */
-    Map<String, Object> respondToReschedule(String token, Long appointmentId, String action);
+    Map<String, Object> respondToReschedule(String token, Integer appointmentId, String action);
+
+    /**
+     * Doctor completes an appointment after the patient visit.
+     * Marks appointment as COMPLETED, adds notes, and optionally creates a follow-up appointment.
+     * Automatically notifies the patient about the completion.
+     *
+     * @param token JWT authentication token
+     * @param appointmentId The appointment to complete
+     * @param notes Doctor's notes about the visit
+     * @param followUpDateTime Optional: date/time for a follow-up appointment (ISO format string)
+     * @return Response with updated appointment info
+     */
+    Map<String, Object> completeAppointment(String token, Integer appointmentId, String notes, String followUpDateTime);
+    
+    /**
+     * Get available time slots for a doctor on a specific date.
+     * Returns time slots with availability status based on confirmed appointments.
+     * 
+     * @param doctorId The doctor's ID
+     * @param date The date to check availability for (ISO date string: YYYY-MM-DD)
+     * @param startTime Doctor's available start time (HH:mm format)
+     * @param endTime Doctor's available end time (HH:mm format)
+     * @return Map with status and list of time slots with availability
+     */
+    Map<String, Object> getAvailableTimeSlots(Long doctorId, String date, String startTime, String endTime);
 }
 

@@ -1,6 +1,7 @@
 package com.MediConnect.EntryRelated.controller;
 
 import com.MediConnect.EntryRelated.service.appointment.AppointmentService;
+import com.MediConnect.EntryRelated.service.appointment.impl.AppointmentServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +27,7 @@ import java.util.Map;
 public class AppointmentController {
 
     private final AppointmentService appointmentService;
+    private final AppointmentServiceImpl appointmentServiceImpl;
 
     /**
      * Endpoint for patients to book appointments.
@@ -107,6 +109,38 @@ public class AppointmentController {
     }
 
     /**
+     * Get available time slots for a doctor on a specific date.
+     * Checks confirmed appointments and returns slots with availability status.
+     * 
+     * Query parameters:
+     * - doctorId: The doctor's ID
+     * - date: The date to check (YYYY-MM-DD format)
+     * - startTime: Doctor's available start time (HH:mm format)
+     * - endTime: Doctor's available end time (HH:mm format)
+     * 
+     * Returns: List of time slots with availability status
+     */
+    @GetMapping("/available-slots")
+    public ResponseEntity<Map<String, Object>> getAvailableTimeSlots(
+            @RequestParam("doctorId") Long doctorId,
+            @RequestParam("date") String date,
+            @RequestParam("startTime") String startTime,
+            @RequestParam("endTime") String endTime) {
+        try {
+            Map<String, Object> response = appointmentService.getAvailableTimeSlots(doctorId, date, startTime, endTime);
+            if ("error".equals(response.get("status"))) {
+                return ResponseEntity.badRequest().body(response);
+            }
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
      * Endpoint for doctors to update appointment status (confirm, cancel, or reschedule).
      * When called, automatically sends notification to the patient.
      * 
@@ -117,7 +151,7 @@ public class AppointmentController {
      */
     @PutMapping("/{id}/status")
     public ResponseEntity<Map<String, Object>> updateAppointmentStatus(
-            @PathVariable("id") Long id,
+            @PathVariable("id") Integer id,
             @RequestBody Map<String, Object> body,
             HttpServletRequest request) {
         try {
@@ -158,7 +192,7 @@ public class AppointmentController {
      */
     @PutMapping("/{id}/respond-reschedule")
     public ResponseEntity<Map<String, Object>> respondToReschedule(
-            @PathVariable("id") Long id,
+            @PathVariable("id") Integer id,
             @RequestParam("action") String action,
             HttpServletRequest request) {
         try {
@@ -171,6 +205,104 @@ public class AppointmentController {
             }
 
             Map<String, Object> response = appointmentService.respondToReschedule(authHeader, id, action);
+            if ("error".equals(response.get("status"))) {
+                return ResponseEntity.badRequest().body(response);
+            }
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * Endpoint for doctors to complete an appointment after the patient visit.
+     * 
+     * Marks the appointment as COMPLETED, adds notes, and optionally creates a follow-up appointment.
+     * Only works for appointments with status CONFIRMED (upcoming appointments).
+     * 
+     * Request body: { notes (optional), followUpDateTime (optional, ISO format string) }
+     */
+    @PutMapping("/{id}/complete")
+    public ResponseEntity<Map<String, Object>> completeAppointment(
+            @PathVariable("id") Integer id,
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        try {
+            String authHeader = request.getHeader("Authorization");
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("status", "error");
+                error.put("message", "Authorization token required");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+            }
+
+            String notes = body.get("notes") != null ? body.get("notes").toString() : null;
+            String followUpDateTime = body.get("followUpDateTime") != null ? body.get("followUpDateTime").toString() : null;
+
+            Map<String, Object> response = appointmentService.completeAppointment(authHeader, id, notes, followUpDateTime);
+            if ("error".equals(response.get("status"))) {
+                return ResponseEntity.badRequest().body(response);
+            }
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * Start video call for an appointment
+     * Only doctors can start calls for their confirmed video call appointments
+     */
+    @PostMapping("/{id}/start-call")
+    public ResponseEntity<Map<String, Object>> startCall(
+            @PathVariable("id") Integer id,
+            HttpServletRequest request) {
+        try {
+            String authHeader = request.getHeader("Authorization");
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("status", "error");
+                error.put("message", "Authorization token required");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+            }
+
+            Map<String, Object> response = appointmentServiceImpl.startCall(authHeader, id);
+            if ("error".equals(response.get("status"))) {
+                return ResponseEntity.badRequest().body(response);
+            }
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * End video call for an appointment
+     * Only doctors can end calls for their appointments
+     */
+    @PostMapping("/{id}/end-call")
+    public ResponseEntity<Map<String, Object>> endCall(
+            @PathVariable("id") Integer id,
+            HttpServletRequest request) {
+        try {
+            String authHeader = request.getHeader("Authorization");
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("status", "error");
+                error.put("message", "Authorization token required");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+            }
+
+            Map<String, Object> response = appointmentServiceImpl.endCall(authHeader, id);
             if ("error".equals(response.get("status"))) {
                 return ResponseEntity.badRequest().body(response);
             }

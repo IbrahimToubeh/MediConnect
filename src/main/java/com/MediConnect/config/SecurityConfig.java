@@ -24,7 +24,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
-@Configuration
+@Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
 @RequiredArgsConstructor
 @EnableMethodSecurity()
@@ -32,10 +32,8 @@ public class SecurityConfig {
 
     private final UserDetailsService userDetailsService;
 
-    private final JwtFilter jwtFilter;
-
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtFilter jwtFilter) throws Exception {
 
 
         return http.csrf(AbstractHttpConfigurer::disable)
@@ -44,8 +42,17 @@ public class SecurityConfig {
                         -> request
                         .requestMatchers("/", "/patient/register", "/patient/login", "/patient/verify-login-otp", 
                                 "/healthprovider/register", "/healthprovider/login", "/healthprovider/verify-login-otp", "/otp/*",
-                                "/healthprovider/public-profile/*"
+                                "/healthprovider/public-profile/*",
+                                "/healthprovider/search",  // Allow public doctor search
+                                "/reviews/doctor/*/rating",
+                                "/appointments/available-slots",
+                                "/posts/test-cloudinary",
+                                "/posts/doctor/*",  // Allow public viewing of doctor posts
+                                "/posts/comments/*",  // Allow public viewing of post comments
+                                "/admin/login",
+                                "/ai/chat"
                         ).permitAll()
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .httpBasic(Customizer.withDefaults())
                 .sessionManagement(session
@@ -77,7 +84,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of("http://localhost:3000"));  // 👈 Your frontend origin
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);  // If using cookies, Authorization header, etc.
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

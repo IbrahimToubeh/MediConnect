@@ -9,6 +9,7 @@ import lombok.Setter;
 public class CreatePostRequestDTO {
     private Long providerId;
     private String content;
-    private String mediaUrl;
+    private String mediaUrl;  // Single media URL (for backward compatibility)
+    private String mediaUrls;  // JSON array of media URLs
     private PostPrivacy privacy;
 }

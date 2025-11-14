@@ -25,7 +25,19 @@ public class MedicalPost {
     @Column(columnDefinition = "TEXT")
     private String content;
 
-    private String mediaUrl;  // image or video URL
+    @Column(columnDefinition = "TEXT")
+    private String mediaUrl;  // Single media URL (for backward compatibility)
+    
+    @Column(columnDefinition = "TEXT")
+    private String mediaUrls;  // JSON array of media URLs (up to 10)
+
+    private Boolean adminFlagged = false;
+
+    @Column(columnDefinition = "TEXT")
+    private String adminFlagReason;
+
+    @Temporal(TemporalType.TIMESTAMP)
+    private Date adminFlaggedAt;
 
     @Enumerated(EnumType.STRING)
     private PostPrivacy privacy;
@@ -41,4 +53,7 @@ public class MedicalPost {
 
     @OneToMany(mappedBy = "post", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<MedicalPostComment> comments = new java.util.ArrayList<>();
+
+    @OneToMany(mappedBy = "post", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<MedicalPostReport> reports = new java.util.ArrayList<>();
 }

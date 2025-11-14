@@ -44,6 +44,15 @@ public class AppointmentEntity {
     @Column(name = "share_medical_records", nullable = false)
     private Boolean shareMedicalRecords = false;
 
+    @Column(name = "is_video_call", nullable = false)
+    private Boolean isVideoCall = false;
+
+    @Column(name = "is_call_active", nullable = false)
+    private Boolean isCallActive = false;
+
+    @Column(name = "reminder_24h_sent", nullable = false)
+    private Boolean reminder24hSent = false;
+
     @Temporal(TemporalType.TIMESTAMP)
     private Date createdAt;
 

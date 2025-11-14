@@ -13,11 +13,19 @@ import com.MediConnect.socialmedia.service.NotificationService;
 import com.MediConnect.socialmedia.service.comment.MedicalPostCommentService;
 import com.MediConnect.socialmedia.service.comment.mapper.CommentMapStructRelated;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.stream.Collectors;
+import jakarta.persistence.EntityNotFoundException;
 
+/**
+ * Service implementation for managing medical post comments, replies, and likes.
+ * Handles CRUD operations, notifications, and user interactions with comments.
+ */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MedicalPostCommentServiceImpl implements MedicalPostCommentService {
@@ -31,370 +39,530 @@ public class MedicalPostCommentServiceImpl implements MedicalPostCommentService 
     private final CommentReplyLikeRepository commentReplyLikeRepository;
     private final UserRepo userRepo;
     private final NotificationService notificationService;
+    private final NotificationRepository notificationRepository;
 
+    /**
+     * Creates a new comment on a medical post.
+     * The comment is automatically saved and a notification is sent to the post owner.
+     * 
+     * @param commentRequestDTO DTO containing post ID, commenter ID, and comment text
+     */
     @Override
     @Transactional
     public void createMedicalPostComment(CreateCommentRequestDTO commentRequestDTO) {
-        System.out.println("=== CREATE COMMENT ===");
-        System.out.println("Post ID: " + commentRequestDTO.getPostId());
-        System.out.println("Commenter ID: " + commentRequestDTO.getCommenterId());
-        System.out.println("Comment Text: " + commentRequestDTO.getCommentText());
+        log.debug("Creating comment - Post ID: {}, Commenter ID: {}", 
+            commentRequestDTO.getPostId(), commentRequestDTO.getCommenterId());
         
+        // Convert DTO to entity and set the post relationship
         MedicalPostComment medicalPostComment = commentMapStructRelated.commentRequestDTOToMedicalPostComment(commentRequestDTO);
-        MedicalPost medicalPost = postRepository.findById(commentRequestDTO.getPostId()).get();
+        MedicalPost medicalPost = postRepository.findById(commentRequestDTO.getPostId())
+            .orElseThrow(() -> new EntityNotFoundException("Post not found with ID: " + commentRequestDTO.getPostId()));
         medicalPostComment.setPost(medicalPost);
+        
+        // Save comment (transaction will commit automatically at method end)
         medicalPostCommentRepository.save(medicalPostComment);
-        medicalPostCommentRepository.flush(); // Force immediate database update
+        log.info("Comment created successfully - ID: {}, Post ID: {}", 
+            medicalPostComment.getId(), commentRequestDTO.getPostId());
         
         // Create notification for post owner
         try {
             Users actor = userRepo.findById(commentRequestDTO.getCommenterId()).orElse(null);
             if (actor != null) {
                 notificationService.createPostCommentNotification(actor, medicalPost, medicalPostComment);
-                System.out.println("✓ Created comment notification");
+                log.debug("Comment notification created for post owner");
             }
         } catch (Exception e) {
-            System.err.println("Failed to create comment notification: " + e.getMessage());
+            log.error("Failed to create comment notification: {}", e.getMessage(), e);
         }
-        
-        System.out.println("Comment saved successfully with ID: " + medicalPostComment.getId());
     }
 
+    /**
+     * Retrieves all comments for a specific post with full details including likes and replies.
+     * 
+     * @param postId The ID of the post to get comments for
+     * @param userId The ID of the current user (for checking if they liked comments)
+     * @return List of comment maps with all details (commenter info, likes, replies, etc.)
+     */
     @Override
+    @Transactional(readOnly = true)
     public List<Map<String, Object>> getCommentsByPostId(Long postId, Long userId) {
-        System.out.println("=== GET COMMENTS FOR POST " + postId + " ===");
+        log.debug("Fetching comments for post ID: {}, User ID: {}", postId, userId);
+        
         List<MedicalPostComment> comments = medicalPostCommentRepository.findByPostIdOrderByCreatedAtDesc(postId);
-        List<Map<String, Object>> commentsWithDetails = new ArrayList<>();
         
-        System.out.println("Found " + comments.size() + " comments");
+        log.debug("Found {} comments for post {}", comments.size(), postId);
 
-        for (MedicalPostComment comment : comments) {
-            Map<String, Object> commentDetails = new HashMap<>();
-            commentDetails.put("id", comment.getId());
-            commentDetails.put("content", comment.getContent());
-            commentDetails.put("createdAt", comment.getCreatedAt());
-            commentDetails.put("commenterId", comment.getCommenterId());
-            
-            // Get commenter details - check both healthcare providers and patients
-            if (comment.getCommenterId() != null) {
-                // Try healthcare provider first
-                Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(comment.getCommenterId());
-                if (providerOpt.isPresent()) {
-                    HealthcareProvider provider = providerOpt.get();
-                    commentDetails.put("commenterName", "Dr. " + provider.getFirstName() + " " + provider.getLastName());
-                    // Get first specialization or default
-                    String specialty = provider.getSpecializations() != null && !provider.getSpecializations().isEmpty() 
-                        ? provider.getSpecializations().get(0).toString() 
-                        : "General Practice";
-                    commentDetails.put("commenterSpecialty", specialty);
-                    System.out.println("Comment by doctor: " + commentDetails.get("commenterName"));
-                } else {
-                    // Try patient
-                    Optional<Patient> patientOpt = patientRepo.findById(comment.getCommenterId());
-                    if (patientOpt.isPresent()) {
-                        Patient patient = patientOpt.get();
-                        commentDetails.put("commenterName", patient.getFirstName() + " " + patient.getLastName());
-                        commentDetails.put("commenterSpecialty", "Patient");
-                        System.out.println("Comment by patient: " + commentDetails.get("commenterName"));
-                    } else {
-                        // Fallback
-                        commentDetails.put("commenterName", "Unknown User");
-                        commentDetails.put("commenterSpecialty", "User");
-                        System.out.println("Comment by unknown user");
-                    }
-                }
-            }
-            
-            // Count likes for this comment
-            long likeCount = commentLikeRepository.countByCommentId(comment.getId());
-            commentDetails.put("likes", (int) likeCount);
-            
-            // Check if current user liked this comment
-            if (userId != null) {
-                List<CommentLike> userLikes = commentLikeRepository.findByCommentIdAndLikeGiverId(comment.getId(), userId);
-                commentDetails.put("isLiked", !userLikes.isEmpty());
-            } else {
-                commentDetails.put("isLiked", false);
-            }
-            
-            // Count replies for this comment
-            long replyCount = commentReplyRepository.countByCommentId(comment.getId());
-            commentDetails.put("replyCount", (int) replyCount);
-            
-            // Get replies for this comment
-            List<CommentReply> replies = commentReplyRepository.findByCommentIdOrderByCreatedAtAsc(comment.getId());
-            List<Map<String, Object>> repliesWithDetails = new ArrayList<>();
-            
-            for (CommentReply reply : replies) {
-                Map<String, Object> replyDetails = new HashMap<>();
-                replyDetails.put("id", reply.getId());
-                replyDetails.put("content", reply.getContent());
-                replyDetails.put("createdAt", reply.getCreatedAt());
-                replyDetails.put("replierId", reply.getReplierId());
-                
-                // Get replier details
-                if (reply.getReplierId() != null) {
-                    Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(reply.getReplierId());
-                    if (providerOpt.isPresent()) {
-                        HealthcareProvider provider = providerOpt.get();
-                        replyDetails.put("replierName", "Dr. " + provider.getFirstName() + " " + provider.getLastName());
-                        String specialty = provider.getSpecializations() != null && !provider.getSpecializations().isEmpty() 
-                            ? provider.getSpecializations().get(0).toString() 
-                            : "General Practice";
-                        replyDetails.put("replierSpecialty", specialty);
-                    } else {
-                        Optional<Patient> patientOpt = patientRepo.findById(reply.getReplierId());
-                        if (patientOpt.isPresent()) {
-                            Patient patient = patientOpt.get();
-                            replyDetails.put("replierName", patient.getFirstName() + " " + patient.getLastName());
-                            replyDetails.put("replierSpecialty", "Patient");
-                        }
-                    }
-                }
-                
-                // Count likes for this reply
-                long replyLikeCount = commentReplyLikeRepository.countByReplyId(reply.getId());
-                replyDetails.put("likes", (int) replyLikeCount);
-                
-                // Check if current user liked this reply
-                if (userId != null) {
-                    List<CommentReplyLike> userReplyLikes = commentReplyLikeRepository.findByReplyIdAndLikeGiverId(reply.getId(), userId);
-                    replyDetails.put("isLiked", !userReplyLikes.isEmpty());
-                } else {
-                    replyDetails.put("isLiked", false);
-                }
-                
-                repliesWithDetails.add(replyDetails);
-            }
-            
-            commentDetails.put("replies", repliesWithDetails);
-            commentsWithDetails.add(commentDetails);
-        }
+        // Build comment DTOs using helper method
+        List<Map<String, Object>> commentsWithDetails = comments.stream()
+            .map(comment -> buildCommentDTO(comment, userId))
+            .collect(Collectors.toList());
         
-        System.out.println("=== END GET COMMENTS ===");
+        log.debug("Returning {} comments with details for post {}", commentsWithDetails.size(), postId);
         return commentsWithDetails;
     }
 
+    /**
+     * Toggles like status for a comment (like if not liked, unlike if already liked).
+     * 
+     * @param commentId The ID of the comment to like/unlike
+     * @param userId The ID of the user performing the action
+     * @return true if comment is now liked, false if unliked
+     * @throws RuntimeException if comment is not found
+     */
     @Override
     @Transactional
     public boolean likeComment(Long commentId, Long userId) {
-        System.out.println("=== LIKE/UNLIKE COMMENT ===");
-        System.out.println("Comment ID: " + commentId + ", User ID: " + userId);
+        log.debug("Toggling like for comment ID: {}, User ID: {}", commentId, userId);
         
+        // Check if user already liked this comment
         List<CommentLike> existingLikes = commentLikeRepository.findByCommentIdAndLikeGiverId(commentId, userId);
         
         if (!existingLikes.isEmpty()) {
-            // Unlike
+            // Unlike - delete existing like
             int deletedCount = commentLikeRepository.deleteByCommentIdAndLikeGiverId(commentId, userId);
-            System.out.println("Deleted " + deletedCount + " comment like(s)");
-            return false;
+            // Note: No need for explicit flush() - @Transactional handles commit automatically
+            log.info("Comment unliked - Comment ID: {}, User ID: {}, Deleted {} like(s)", 
+                commentId, userId, deletedCount);
+            return false; // Return false to indicate unliked
         } else {
-            // Like
-            Optional<MedicalPostComment> commentOpt = medicalPostCommentRepository.findById(commentId);
-            if (commentOpt.isPresent()) {
-                CommentLike like = new CommentLike();
-                like.setComment(commentOpt.get());
-                like.setLikeGiverId(userId);
-                like.setCreatedAt(new Date());
-                commentLikeRepository.save(like);
-                commentLikeRepository.flush();
-                System.out.println("Comment liked successfully");
-                
-                // Create notification for comment owner
-                Users actor = userRepo.findById(userId).orElse(null);
-                if (actor != null) {
-                    notificationService.createCommentLikeNotification(actor, commentOpt.get());
-                }
-                
-                return true;
+            // Like - create new like
+            MedicalPostComment comment = medicalPostCommentRepository.findById(commentId)
+                .orElseThrow(() -> {
+                    log.error("Comment not found with ID: {}", commentId);
+                    return new RuntimeException("Comment not found with ID: " + commentId);
+                });
+            
+            CommentLike like = new CommentLike();
+            like.setComment(comment);
+            like.setLikeGiverId(userId);
+            like.setCreatedAt(new Date());
+            commentLikeRepository.save(like);
+            // Note: No need for explicit flush() - @Transactional handles commit automatically
+            log.info("Comment liked - Comment ID: {}, User ID: {}, Like ID: {}", 
+                commentId, userId, like.getId());
+            
+            // Create notification for comment owner
+            Users actor = userRepo.findById(userId).orElse(null);
+            if (actor != null) {
+                notificationService.createCommentLikeNotification(actor, comment);
             }
+            
+            return true;
         }
-        return false;
     }
 
+    /**
+     * Deletes a comment if the user is the owner.
+     * 
+     * @param commentId The ID of the comment to delete
+     * @param userId The ID of the user attempting to delete
+     * @throws RuntimeException if comment not found or user is not the owner
+     */
     @Override
     @Transactional
     public void deleteComment(Long commentId, Long userId) {
-        System.out.println("=== DELETE COMMENT ===");
-        System.out.println("Comment ID: " + commentId + ", User ID: " + userId);
+        log.debug("Attempting to delete comment ID: {} by user ID: {}", commentId, userId);
         
-        Optional<MedicalPostComment> commentOpt = medicalPostCommentRepository.findById(commentId);
-        if (commentOpt.isPresent()) {
-            MedicalPostComment comment = commentOpt.get();
-            
-            // Check if user is the owner of the comment
-            if (Objects.equals(comment.getCommenterId(), userId)) {
-                medicalPostCommentRepository.delete(comment);
-                medicalPostCommentRepository.flush();
-                System.out.println("Comment deleted successfully");
-            } else {
-                throw new RuntimeException("You can only delete your own comments");
-            }
-        } else {
-            throw new RuntimeException("Comment not found");
+        MedicalPostComment comment = medicalPostCommentRepository.findById(commentId)
+            .orElseThrow(() -> {
+                log.error("Comment not found with ID: {}", commentId);
+                return new RuntimeException("Comment not found");
+            });
+        
+        // Verify user is the owner of the comment
+        if (!Objects.equals(comment.getCommenterId(), userId)) {
+            log.warn("User {} attempted to delete comment {} owned by user {}", 
+                userId, commentId, comment.getCommenterId());
+            throw new RuntimeException("You can only delete your own comments");
         }
+        
+        // Delete comment (cascade will handle related likes and replies)
+        medicalPostCommentRepository.delete(comment);
+        // Note: No need for explicit flush() - @Transactional handles commit automatically
+        log.info("Comment deleted successfully - Comment ID: {}, User ID: {}", commentId, userId);
     }
 
+    /**
+     * Admin-only method to delete any comment.
+     * Removes associated notifications before deleting the comment.
+     * 
+     * @param commentId The ID of the comment to delete
+     * @throws EntityNotFoundException if comment not found
+     */
+    @Override
+    @Transactional
+    public void adminDeleteComment(Long commentId) {
+        log.debug("Admin deleting comment ID: {}", commentId);
+
+        MedicalPostComment comment = medicalPostCommentRepository.findById(commentId)
+                .orElseThrow(() -> {
+                    log.error("Comment not found for admin delete - ID: {}", commentId);
+                    return new EntityNotFoundException("Comment not found");
+                });
+
+        // Remove notifications tied to this comment before deleting
+        notificationRepository.deleteByComment(comment);
+
+        // Delete comment (cascade will handle related likes and replies)
+        medicalPostCommentRepository.delete(comment);
+        // Note: No need for explicit flush() - @Transactional handles commit automatically
+        log.info("Admin deleted comment successfully - Comment ID: {}", commentId);
+    }
+
+    /**
+     * Creates a reply to an existing comment.
+     * 
+     * @param commentId The ID of the comment being replied to
+     * @param replierId The ID of the user creating the reply
+     * @param replyText The content of the reply
+     * @throws RuntimeException if comment not found
+     */
     @Override
     @Transactional
     public void replyToComment(Long commentId, Long replierId, String replyText) {
-        System.out.println("=== REPLY TO COMMENT ===");
-        System.out.println("Comment ID: " + commentId + ", Replier ID: " + replierId);
+        log.debug("Creating reply to comment ID: {} by user ID: {}", commentId, replierId);
         
-        Optional<MedicalPostComment> commentOpt = medicalPostCommentRepository.findById(commentId);
-        if (commentOpt.isPresent()) {
-            CommentReply reply = new CommentReply();
-            reply.setComment(commentOpt.get());
-            reply.setReplierId(replierId);
-            reply.setContent(replyText);
-            reply.setCreatedAt(new Date());
-            commentReplyRepository.save(reply);
-            commentReplyRepository.flush();
-            System.out.println("Reply saved successfully with ID: " + reply.getId());
-        } else {
-            throw new RuntimeException("Comment not found");
-        }
+        MedicalPostComment comment = medicalPostCommentRepository.findById(commentId)
+            .orElseThrow(() -> {
+                log.error("Comment not found for reply - ID: {}", commentId);
+                return new RuntimeException("Comment not found");
+            });
+        
+        CommentReply reply = new CommentReply();
+        reply.setComment(comment);
+        reply.setReplierId(replierId);
+        reply.setContent(replyText);
+        reply.setCreatedAt(new Date());
+        commentReplyRepository.save(reply);
+        // Note: No need for explicit flush() - @Transactional handles commit automatically
+        log.info("Reply created successfully - Reply ID: {}, Comment ID: {}", reply.getId(), commentId);
     }
 
+    /**
+     * Toggles like status for a reply (like if not liked, unlike if already liked).
+     * 
+     * @param replyId The ID of the reply to like/unlike
+     * @param userId The ID of the user performing the action
+     * @return true if reply is now liked, false if unliked
+     * @throws RuntimeException if reply is not found
+     */
     @Override
     @Transactional
     public boolean likeReply(Long replyId, Long userId) {
-        System.out.println("=== LIKE/UNLIKE REPLY ===");
-        System.out.println("Reply ID: " + replyId + ", User ID: " + userId);
+        log.debug("Toggling like for reply ID: {}, User ID: {}", replyId, userId);
         
+        // Check if user already liked this reply
         List<CommentReplyLike> existingLikes = commentReplyLikeRepository.findByReplyIdAndLikeGiverId(replyId, userId);
         
         if (!existingLikes.isEmpty()) {
-            // Unlike
+            // Unlike - delete existing like
             int deletedCount = commentReplyLikeRepository.deleteByReplyIdAndLikeGiverId(replyId, userId);
-            System.out.println("Deleted " + deletedCount + " reply like(s)");
-            return false;
+            // Note: No need for explicit flush() - @Transactional handles commit automatically
+            log.info("Reply unliked - Reply ID: {}, User ID: {}, Deleted {} like(s)", 
+                replyId, userId, deletedCount);
+            return false; // Return false to indicate unliked
         } else {
-            // Like
-            Optional<CommentReply> replyOpt = commentReplyRepository.findById(replyId);
-            if (replyOpt.isPresent()) {
-                CommentReplyLike like = new CommentReplyLike();
-                like.setReply(replyOpt.get());
-                like.setLikeGiverId(userId);
-                like.setCreatedAt(new Date());
-                commentReplyLikeRepository.save(like);
-                commentReplyLikeRepository.flush();
-                System.out.println("Reply liked successfully");
-                return true;
-            }
+            // Like - create new like
+            CommentReply reply = commentReplyRepository.findById(replyId)
+                .orElseThrow(() -> {
+                    log.error("Reply not found with ID: {}", replyId);
+                    return new RuntimeException("Reply not found with ID: " + replyId);
+                });
+            
+            CommentReplyLike like = new CommentReplyLike();
+            like.setReply(reply);
+            like.setLikeGiverId(userId);
+            like.setCreatedAt(new Date());
+            commentReplyLikeRepository.save(like);
+            // Note: No need for explicit flush() - @Transactional handles commit automatically
+            log.info("Reply liked - Reply ID: {}, User ID: {}, Like ID: {}", 
+                replyId, userId, like.getId());
+            return true;
         }
-        return false;
     }
 
+    /**
+     * Deletes a reply if the user is the owner.
+     * 
+     * @param replyId The ID of the reply to delete
+     * @param userId The ID of the user attempting to delete
+     * @throws RuntimeException if reply not found or user is not the owner
+     */
     @Override
     @Transactional
     public void deleteReply(Long replyId, Long userId) {
-        System.out.println("=== DELETE REPLY ===");
-        System.out.println("Reply ID: " + replyId + ", User ID: " + userId);
+        log.debug("Attempting to delete reply ID: {} by user ID: {}", replyId, userId);
         
-        Optional<CommentReply> replyOpt = commentReplyRepository.findById(replyId);
-        if (replyOpt.isPresent()) {
-            CommentReply reply = replyOpt.get();
-            
-            // Check if user is the owner of the reply
-            if (Objects.equals(reply.getReplierId(), userId)) {
-                commentReplyRepository.delete(reply);
-                commentReplyRepository.flush();
-                System.out.println("Reply deleted successfully");
-            } else {
-                throw new RuntimeException("You can only delete your own replies");
-            }
-        } else {
-            throw new RuntimeException("Reply not found");
+        CommentReply reply = commentReplyRepository.findById(replyId)
+            .orElseThrow(() -> {
+                log.error("Reply not found with ID: {}", replyId);
+                return new RuntimeException("Reply not found");
+            });
+        
+        // Verify user is the owner of the reply
+        if (!Objects.equals(reply.getReplierId(), userId)) {
+            log.warn("User {} attempted to delete reply {} owned by user {}", 
+                userId, replyId, reply.getReplierId());
+            throw new RuntimeException("You can only delete your own replies");
         }
+        
+        // Delete reply (cascade will handle related likes)
+        commentReplyRepository.delete(reply);
+        // Note: No need for explicit flush() - @Transactional handles commit automatically
+        log.info("Reply deleted successfully - Reply ID: {}, User ID: {}", replyId, userId);
     }
 
+    /**
+     * Retrieves all users who liked a specific comment with their details.
+     * 
+     * @param commentId The ID of the comment
+     * @return List of maps containing liker details (name, specialty, userType, etc.)
+     */
     @Override
+    @Transactional(readOnly = true)
     public List<Map<String, Object>> getCommentLikers(Long commentId) {
-        System.out.println("=== GET COMMENT LIKERS ===");
-        System.out.println("Comment ID: " + commentId);
+        log.debug("Fetching likers for comment ID: {}", commentId);
         
         // Get all likes for the comment
         List<CommentLike> allLikes = commentLikeRepository.findByCommentId(commentId);
         
-        List<Map<String, Object>> likersWithDetails = new ArrayList<>();
+        log.debug("Found {} likers for comment {}", allLikes.size(), commentId);
         
-        System.out.println("Found " + allLikes.size() + " likers for comment");
+        // Build liker DTOs using helper method
+        List<Map<String, Object>> likersWithDetails = allLikes.stream()
+            .map(this::buildCommentLikerDetails)
+            .collect(Collectors.toList());
         
-        for (CommentLike like : allLikes) {
-            Map<String, Object> likerDetails = new HashMap<>();
-            likerDetails.put("userId", like.getLikeGiverId());
-            likerDetails.put("likedAt", like.getCreatedAt());
-            
-            if (like.getLikeGiverId() != null) {
-                Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(like.getLikeGiverId());
-                if (providerOpt.isPresent()) {
-                    HealthcareProvider provider = providerOpt.get();
-                    likerDetails.put("name", "Dr. " + provider.getFirstName() + " " + provider.getLastName());
-                    String specialty = provider.getSpecializations() != null && !provider.getSpecializations().isEmpty() 
-                        ? provider.getSpecializations().get(0).toString() 
-                        : "General Practice";
-                    likerDetails.put("specialty", specialty);
-                    likerDetails.put("userType", "doctor");
-                } else {
-                    Optional<Patient> patientOpt = patientRepo.findById(like.getLikeGiverId());
-                    if (patientOpt.isPresent()) {
-                        Patient patient = patientOpt.get();
-                        likerDetails.put("name", patient.getFirstName() + " " + patient.getLastName());
-                        likerDetails.put("specialty", "Patient");
-                        likerDetails.put("userType", "patient");
-                    }
-                }
-            }
-            
-            likersWithDetails.add(likerDetails);
-        }
-        
-        System.out.println("Returning " + likersWithDetails.size() + " comment likers");
+        log.debug("Returning {} likers for comment {}", likersWithDetails.size(), commentId);
         return likersWithDetails;
     }
 
+    /**
+     * Retrieves all users who liked a specific reply with their details.
+     * 
+     * @param replyId The ID of the reply
+     * @return List of maps containing liker details (name, specialty, userType, etc.)
+     */
     @Override
+    @Transactional(readOnly = true)
     public List<Map<String, Object>> getReplyLikers(Long replyId) {
-        System.out.println("=== GET REPLY LIKERS ===");
-        System.out.println("Reply ID: " + replyId);
+        log.debug("Fetching likers for reply ID: {}", replyId);
         
         List<CommentReplyLike> allLikes = commentReplyLikeRepository.findByReplyId(replyId);
         
-        List<Map<String, Object>> likersWithDetails = new ArrayList<>();
+        log.debug("Found {} likers for reply {}", allLikes.size(), replyId);
         
-        System.out.println("Found " + allLikes.size() + " likers for reply");
+        // Build liker DTOs using helper method
+        List<Map<String, Object>> likersWithDetails = allLikes.stream()
+            .map(this::buildReplyLikerDetails)
+            .collect(Collectors.toList());
         
-        for (CommentReplyLike like : allLikes) {
-            Map<String, Object> likerDetails = new HashMap<>();
-            likerDetails.put("userId", like.getLikeGiverId());
-            likerDetails.put("likedAt", like.getCreatedAt());
-            
-            if (like.getLikeGiverId() != null) {
-                Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(like.getLikeGiverId());
-                if (providerOpt.isPresent()) {
-                    HealthcareProvider provider = providerOpt.get();
-                    likerDetails.put("name", "Dr. " + provider.getFirstName() + " " + provider.getLastName());
-                    String specialty = provider.getSpecializations() != null && !provider.getSpecializations().isEmpty() 
-                        ? provider.getSpecializations().get(0).toString() 
-                        : "General Practice";
-                    likerDetails.put("specialty", specialty);
-                    likerDetails.put("userType", "doctor");
-                } else {
-                    Optional<Patient> patientOpt = patientRepo.findById(like.getLikeGiverId());
-                    if (patientOpt.isPresent()) {
-                        Patient patient = patientOpt.get();
-                        likerDetails.put("name", patient.getFirstName() + " " + patient.getLastName());
-                        likerDetails.put("specialty", "Patient");
-                        likerDetails.put("userType", "patient");
-                    }
-                }
-            }
-            
-            likersWithDetails.add(likerDetails);
+        log.debug("Returning {} likers for reply {}", likersWithDetails.size(), replyId);
+        return likersWithDetails;
+    }
+    
+    /**
+     * Builds user details map for a given user ID.
+     * Checks both healthcare providers and patients to find the user.
+     * 
+     * @param userId The ID of the user
+     * @return Map containing user details (name, specialty, userType) or null if user not found
+     */
+    private Map<String, Object> buildUserDetails(Long userId) {
+        if (userId == null) {
+            return null;
         }
         
-        System.out.println("Returning " + likersWithDetails.size() + " reply likers");
-        return likersWithDetails;
+        Map<String, Object> userDetails = new HashMap<>();
+        
+        // Try healthcare provider first
+        Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(userId);
+        if (providerOpt.isPresent()) {
+            HealthcareProvider provider = providerOpt.get();
+            userDetails.put("name", "Dr. " + provider.getFirstName() + " " + provider.getLastName());
+            String specialty = provider.getSpecializations() != null && !provider.getSpecializations().isEmpty() 
+                ? provider.getSpecializations().get(0).toString() 
+                : "General Practice";
+            userDetails.put("specialty", specialty);
+            userDetails.put("userType", "doctor");
+            return userDetails;
+        }
+        
+        // Try patient
+        Optional<Patient> patientOpt = patientRepo.findById(userId);
+        if (patientOpt.isPresent()) {
+            Patient patient = patientOpt.get();
+            userDetails.put("name", patient.getFirstName() + " " + patient.getLastName());
+            userDetails.put("specialty", "Patient");
+            userDetails.put("userType", "patient");
+            return userDetails;
+        }
+        
+        // Fallback for unknown users
+        userDetails.put("name", "Unknown User");
+        userDetails.put("specialty", "User");
+        userDetails.put("userType", "unknown");
+        return userDetails;
+    }
+    
+    /**
+     * Builds commenter/replier details map for a given user ID.
+     * Used specifically for comment and reply DTOs (uses "commenterName" or "replierName" keys).
+     * 
+     * @param userId The ID of the user
+     * @param prefix The prefix for the name key ("commenter" or "replier")
+     * @return Map containing user details with prefixed keys
+     */
+    private Map<String, Object> buildCommenterDetails(Long userId, String prefix) {
+        if (userId == null) {
+            return new HashMap<>();
+        }
+        
+        Map<String, Object> details = new HashMap<>();
+        
+        // Try healthcare provider first
+        Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(userId);
+        if (providerOpt.isPresent()) {
+            HealthcareProvider provider = providerOpt.get();
+            details.put(prefix + "Name", "Dr. " + provider.getFirstName() + " " + provider.getLastName());
+            String specialty = provider.getSpecializations() != null && !provider.getSpecializations().isEmpty() 
+                ? provider.getSpecializations().get(0).toString() 
+                : "General Practice";
+            details.put(prefix + "Specialty", specialty);
+            return details;
+        }
+        
+        // Try patient
+        Optional<Patient> patientOpt = patientRepo.findById(userId);
+        if (patientOpt.isPresent()) {
+            Patient patient = patientOpt.get();
+            details.put(prefix + "Name", patient.getFirstName() + " " + patient.getLastName());
+            details.put(prefix + "Specialty", "Patient");
+            return details;
+        }
+        
+        // Fallback for unknown users
+        details.put(prefix + "Name", "Unknown User");
+        details.put(prefix + "Specialty", "User");
+        log.warn("User with ID {} not found in healthcare providers or patients", userId);
+        return details;
+    }
+    
+    /**
+     * Builds a reply DTO map from a CommentReply entity.
+     * 
+     * @param reply The reply entity
+     * @param userId The ID of the current user (for checking if they liked the reply)
+     * @return Map containing reply details
+     */
+    private Map<String, Object> buildReplyDTO(CommentReply reply, Long userId) {
+        Map<String, Object> replyDetails = new HashMap<>();
+        replyDetails.put("id", reply.getId());
+        replyDetails.put("content", reply.getContent());
+        replyDetails.put("createdAt", reply.getCreatedAt());
+        replyDetails.put("replierId", reply.getReplierId());
+        
+        // Get replier details
+        Map<String, Object> replierDetails = buildCommenterDetails(reply.getReplierId(), "replier");
+        replyDetails.putAll(replierDetails);
+        
+        // Count likes for this reply
+        long replyLikeCount = commentReplyLikeRepository.countByReplyId(reply.getId());
+        replyDetails.put("likes", (int) replyLikeCount);
+        
+        // Check if current user liked this reply
+        if (userId != null) {
+            List<CommentReplyLike> userReplyLikes = commentReplyLikeRepository.findByReplyIdAndLikeGiverId(reply.getId(), userId);
+            replyDetails.put("isLiked", !userReplyLikes.isEmpty());
+        } else {
+            replyDetails.put("isLiked", false);
+        }
+        
+        return replyDetails;
+    }
+    
+    /**
+     * Builds a comment DTO map from a MedicalPostComment entity.
+     * 
+     * @param comment The comment entity
+     * @param userId The ID of the current user (for checking if they liked the comment)
+     * @return Map containing comment details including replies
+     */
+    private Map<String, Object> buildCommentDTO(MedicalPostComment comment, Long userId) {
+        Map<String, Object> commentDetails = new HashMap<>();
+        commentDetails.put("id", comment.getId());
+        commentDetails.put("content", comment.getContent());
+        commentDetails.put("createdAt", comment.getCreatedAt());
+        commentDetails.put("commenterId", comment.getCommenterId());
+        
+        // Get commenter details
+        Map<String, Object> commenterDetails = buildCommenterDetails(comment.getCommenterId(), "commenter");
+        commentDetails.putAll(commenterDetails);
+        
+        // Count likes for this comment
+        long likeCount = commentLikeRepository.countByCommentId(comment.getId());
+        commentDetails.put("likes", (int) likeCount);
+        
+        // Check if current user liked this comment
+        if (userId != null) {
+            List<CommentLike> userLikes = commentLikeRepository.findByCommentIdAndLikeGiverId(comment.getId(), userId);
+            commentDetails.put("isLiked", !userLikes.isEmpty());
+        } else {
+            commentDetails.put("isLiked", false);
+        }
+        
+        // Count replies for this comment
+        long replyCount = commentReplyRepository.countByCommentId(comment.getId());
+        commentDetails.put("replyCount", (int) replyCount);
+        
+        // Get replies for this comment
+        List<CommentReply> replies = commentReplyRepository.findByCommentIdOrderByCreatedAtAsc(comment.getId());
+        List<Map<String, Object>> repliesWithDetails = replies.stream()
+            .map(reply -> buildReplyDTO(reply, userId))
+            .collect(Collectors.toList());
+        
+        commentDetails.put("replies", repliesWithDetails);
+        
+        return commentDetails;
+    }
+    
+    /**
+     * Builds a liker details map from a CommentLike entity.
+     * 
+     * @param like The like entity
+     * @return Map containing liker details (userId, likedAt, name, specialty, userType)
+     */
+    private Map<String, Object> buildCommentLikerDetails(CommentLike like) {
+        Map<String, Object> likerDetails = new HashMap<>();
+        likerDetails.put("userId", like.getLikeGiverId());
+        likerDetails.put("likedAt", like.getCreatedAt());
+        
+        // Get user details
+        Map<String, Object> userDetails = buildUserDetails(like.getLikeGiverId());
+        if (userDetails != null) {
+            likerDetails.putAll(userDetails);
+        }
+        
+        return likerDetails;
+    }
+    
+    /**
+     * Builds a liker details map from a CommentReplyLike entity.
+     * 
+     * @param like The like entity
+     * @return Map containing liker details (userId, likedAt, name, specialty, userType)
+     */
+    private Map<String, Object> buildReplyLikerDetails(CommentReplyLike like) {
+        Map<String, Object> likerDetails = new HashMap<>();
+        likerDetails.put("userId", like.getLikeGiverId());
+        likerDetails.put("likedAt", like.getCreatedAt());
+        
+        // Get user details
+        Map<String, Object> userDetails = buildUserDetails(like.getLikeGiverId());
+        if (userDetails != null) {
+            likerDetails.putAll(userDetails);
+        }
+        
+        return likerDetails;
     }
 }

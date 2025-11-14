@@ -3,6 +3,7 @@ package com.MediConnect.EntryRelated.service.healthprovider.impl;
 import com.MediConnect.EntryRelated.dto.healthprovider.GetAllSpecialtyDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.LoginHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
+import com.MediConnect.EntryRelated.entities.AccountStatus;
 import com.MediConnect.EntryRelated.entities.EducationHistory;
 import com.MediConnect.EntryRelated.entities.HealthcareProvider;
 import com.MediConnect.EntryRelated.entities.SpecializationType;
@@ -13,7 +14,10 @@ import com.MediConnect.EntryRelated.service.OTPService;
 import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
 import com.MediConnect.EntryRelated.service.healthprovider.mapper.HealthcareProviderMapper;
 import com.MediConnect.Service.UserService;
+import com.MediConnect.EntryRelated.exception.AccountStatusException;
 import com.MediConnect.config.JWTService;
+import com.MediConnect.socialmedia.entity.NotificationType;
+import com.MediConnect.socialmedia.service.NotificationService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -34,6 +38,7 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
     private final OTPService otpService;
     private final JWTService jwtService;
     private final ActivityService activityService;
+    private final NotificationService notificationService;
     @Transactional
     public String register(SignupHPRequestDTO dto) {
         try {
@@ -64,6 +69,8 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
             provider.setRegistrationDate(new Date());
             // Get password from DTO since mapper ignores it
             provider.setPassword(passwordEncoder.encode(dto.getPassword()));
+            // Newly registered doctors must be reviewed by an admin before accessing the platform.
+            provider.setAccountStatus(AccountStatus.PENDING);
         
         // Convert date of birth from string to Date
         if (dto.getDateOfBirth() != null && !dto.getDateOfBirth().isEmpty()) {
@@ -121,6 +128,11 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
 
         System.out.println("Saving provider to database...");
         providerRepo.save(provider);
+
+        String fullName = formatName(provider.getFirstName(), provider.getLastName());
+        String approvalMessage = "New doctor registration pending approval: Dr. " + fullName;
+        notificationService.createAdminNotification(provider, approvalMessage, NotificationType.ADMIN_DOCTOR_REGISTRATION, provider.getId());
+
         System.out.println("Provider saved successfully with ID: " + provider.getId());
         System.out.println("=== DOCTOR REGISTRATION END ===");
         return "Healthcare provider registered successfully";
@@ -147,7 +159,11 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
         }
 
         // 3. Authenticate credentials
-        userService.authenticate(loginRequest.getUsername(), loginRequest.getPassword());
+        try {
+            userService.authenticate(loginRequest.getUsername(), loginRequest.getPassword());
+        } catch (AccountStatusException ex) {
+            throw new RuntimeException(ex.getMessage());
+        }
 
         // 4. Handle 2FA (OTP)
         if (userService.isTwoFactorEnabled(loginRequest.getUsername())) {
@@ -177,6 +193,20 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
         response.put("token", token);
         response.put("userId", provider.getId());
         return response;
+    }
+
+    private String formatName(String firstName, String lastName) {
+        StringBuilder builder = new StringBuilder();
+        if (firstName != null && !firstName.isBlank()) {
+            builder.append(firstName.trim());
+        }
+        if (lastName != null && !lastName.isBlank()) {
+            if (builder.length() > 0) {
+                builder.append(' ');
+            }
+            builder.append(lastName.trim());
+        }
+        return builder.length() > 0 ? builder.toString() : "A doctor";
     }
 
     @Override

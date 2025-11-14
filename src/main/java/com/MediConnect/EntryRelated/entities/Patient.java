@@ -6,6 +6,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.Date;
 import java.util.List;
 
 @Entity
@@ -67,6 +68,14 @@ public class Patient extends Users {
 
     @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<MedicalRecord> medicalRecords;
+
+    private Boolean adminFlagged = false;
+
+    @Column(columnDefinition = "TEXT")
+    private String adminFlagReason;
+
+    @Temporal(TemporalType.TIMESTAMP)
+    private Date adminFlaggedAt;
 
     private List<Long> listOfFollowedPeople;
 }

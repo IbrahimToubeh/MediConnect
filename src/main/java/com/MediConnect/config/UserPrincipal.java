@@ -1,5 +1,6 @@
 package com.MediConnect.config;
 
+import com.MediConnect.EntryRelated.entities.AccountStatus;
 import com.MediConnect.EntryRelated.entities.Users;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -37,7 +38,11 @@ public class UserPrincipal implements UserDetails {
 
     @Override
     public boolean isAccountNonLocked() {
-        return true;
+        AccountStatus status = user.getAccountStatus();
+        return status != AccountStatus.ON_HOLD
+                && status != AccountStatus.BANNED
+                && status != AccountStatus.PENDING
+                && status != AccountStatus.REJECTED;
     }
 
     @Override
@@ -47,6 +52,7 @@ public class UserPrincipal implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return true;
+        AccountStatus status = user.getAccountStatus();
+        return status == AccountStatus.ACTIVE;
     }
 }

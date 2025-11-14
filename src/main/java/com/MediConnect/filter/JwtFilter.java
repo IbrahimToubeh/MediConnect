@@ -30,19 +30,48 @@ public class JwtFilter extends OncePerRequestFilter {
         String authHeader = request.getHeader("Authorization");
         String token = null;
         String username = null;
+        
+        // Only process if Authorization header exists and starts with "Bearer "
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             token = authHeader.substring(7);
-            username = jwtService.extractUserName(token);
-        }
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = applicationContext.getBean(MyUserDetailsService.class).loadUserByUsername(username);
-            if (jwtService.validateToken(token, userDetails)) {
-                UsernamePasswordAuthenticationToken authToken =
-                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authToken);
+            
+            // Skip if token is empty or just whitespace
+            if (token == null || token.trim().isEmpty()) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+            
+            // Try to extract username from token
+            // If token is malformed, expired, or invalid, catch the exception and continue
+            // This allows requests without valid tokens to proceed (Spring Security will handle authorization)
+            try {
+                username = jwtService.extractUserName(token);
+            } catch (Exception e) {
+                // Token is invalid, malformed, or expired
+                // Only log errors, not successful authentications
+                System.err.println("JWT Filter: Token validation failed: " + e.getMessage());
+                filterChain.doFilter(request, response);
+                return;
             }
         }
+        
+        // If we have a valid username and no existing authentication, proceed with authentication
+        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            try {
+                UserDetails userDetails = applicationContext.getBean(MyUserDetailsService.class).loadUserByUsername(username);
+                if (jwtService.validateToken(token, userDetails)) {
+                    UsernamePasswordAuthenticationToken authToken =
+                            new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                }
+            } catch (Exception e) {
+                // If user lookup or token validation fails, continue without authentication
+                // Spring Security will handle authorization based on endpoint configuration
+                System.err.println("JWT Filter: Failed to authenticate user: " + e.getMessage());
+            }
+        }
+        
         filterChain.doFilter(request, response);
     }
 }

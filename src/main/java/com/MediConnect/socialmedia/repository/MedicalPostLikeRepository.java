@@ -29,4 +29,25 @@ public interface MedicalPostLikeRepository extends JpaRepository<MedicalPostLike
     @Modifying
     @Query("DELETE FROM MedicalPostLike l WHERE l.post.id = :postId AND l.likeGiverId = :userId")
     int deleteByPostIdAndLikeGiverId(@Param("postId") Long postId, @Param("userId") Long userId);
+    
+    /**
+     * Batch fetch: Gets like counts for multiple posts in a single query.
+     * Returns a list of Object arrays where [0] = postId (Long), [1] = count (Long).
+     * 
+     * @param postIds List of post IDs to get like counts for
+     * @return List of Object arrays [postId, count]
+     */
+    @Query("SELECT l.post.id, COUNT(l) FROM MedicalPostLike l WHERE l.post.id IN :postIds GROUP BY l.post.id")
+    List<Object[]> countLikesByPostIds(@Param("postIds") List<Long> postIds);
+    
+    /**
+     * Batch fetch: Gets all likes for a specific user across multiple posts in a single query.
+     * Returns list of post IDs that the user has liked.
+     * 
+     * @param postIds List of post IDs to check
+     * @param userId The user ID to check likes for
+     * @return List of post IDs that the user has liked
+     */
+    @Query("SELECT DISTINCT l.post.id FROM MedicalPostLike l WHERE l.post.id IN :postIds AND l.likeGiverId = :userId")
+    List<Long> findPostIdsLikedByUser(@Param("postIds") List<Long> postIds, @Param("userId") Long userId);
 }
