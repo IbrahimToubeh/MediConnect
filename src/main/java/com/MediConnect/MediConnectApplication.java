@@ -6,7 +6,7 @@ import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-
+//comment testing
 @SpringBootApplication(scanBasePackages = "com.MediConnect")
 @EnableCaching
 @EnableScheduling
