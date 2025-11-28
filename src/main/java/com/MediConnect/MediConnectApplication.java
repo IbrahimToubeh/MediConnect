@@ -9,6 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 //comment testing
 //todo: after picking time for appointment it becomes earlier by 3 hours for all scheduling
 //TODO: VIDEO CALL / upload pdf
+//todo: all done
 @SpringBootApplication(scanBasePackages = "com.MediConnect")
 @EnableCaching
 @EnableScheduling
