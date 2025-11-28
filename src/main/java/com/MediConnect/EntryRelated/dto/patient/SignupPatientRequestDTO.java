@@ -35,6 +35,7 @@ SignupPatientRequestDTO {
     private MentalHealthCondition mentalHealthCondition;
     private List<CurrentMedicationDTO> medications;
     private List<MentalHealthMedicationDTO> mentalHealthMedications;
+    private List<LaboratoryResultDTO> laboratoryResults;
     
     // Insurance Information
     private String insuranceProvider;

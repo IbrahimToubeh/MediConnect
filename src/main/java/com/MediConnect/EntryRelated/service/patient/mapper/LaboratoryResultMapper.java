@@ -23,4 +23,11 @@ public interface LaboratoryResultMapper {
     default int calculateImageSize(byte[] image) {
         return image != null ? image.length : 0;
     }
+
+    @Mapping(target = "description", source = "testType")
+    @Mapping(target = "resultUrl", source = "resultUrl")
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "image", ignore = true)
+    @Mapping(target = "patient", ignore = true)
+    LaboratoryResult toEntity(com.MediConnect.EntryRelated.dto.patient.LaboratoryResultDTO dto);
 }

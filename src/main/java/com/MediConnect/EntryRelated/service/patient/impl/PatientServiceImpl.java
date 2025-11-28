@@ -431,6 +431,7 @@ public class PatientServiceImpl implements PatientService {
         dto.setDescription(labResult.getDescription());
         dto.setHasImage(labResult.getImage() != null && labResult.getImage().length > 0);
         dto.setImageSize(labResult.getImage() != null ? labResult.getImage().length : 0);
+        dto.setResultUrl(labResult.getResultUrl());
         return dto;
     }
 
@@ -566,6 +567,9 @@ public class PatientServiceImpl implements PatientService {
             }
         }
 
+        // Lab Results are managed via dedicated endpoints (upload/delete)
+        // We do NOT update them here to avoid overwriting or duplicating entries
+        /*
         if (updateRequest.getLabResults() != null) {
             // Clear existing lab results and add new ones
             patient.getLaboratoryResults().clear();
@@ -577,6 +581,7 @@ public class PatientServiceImpl implements PatientService {
                 patient.getLaboratoryResults().add(labResult);
             }
         }
+        */
     }
 
 }

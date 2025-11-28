@@ -17,6 +17,7 @@ import com.MediConnect.EntryRelated.service.ActivityService;
 import com.MediConnect.EntryRelated.service.NotificationPreferencesService;
 import com.MediConnect.EntryRelated.service.PrivacySettingsService;
 import com.MediConnect.Service.UserService;
+import com.MediConnect.socialmedia.service.CloudinaryService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import jakarta.validation.Valid;
@@ -48,6 +49,7 @@ public class PatientController {
     private final ActivityService activityService;
     private final NotificationPreferencesService notificationPreferencesService;
     private final PrivacySettingsService privacySettingsService;
+    private final CloudinaryService cloudinaryService;
 
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(@Valid @RequestBody SignupPatientRequestDTO patientInfo) {
@@ -829,4 +831,150 @@ public class PatientController {
             return ResponseEntity.badRequest().body(response);
         }
     }*/
+
+    /**
+     * Upload lab result PDF file
+     * @param file The PDF file to upload
+     * @param description Lab result description
+     * @param authentication The authenticated user
+     * @return Response with lab result details including resultUrl
+     */
+    @PostMapping("/lab-result/upload")
+    public ResponseEntity<Map<String, Object>> uploadLabResult(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("description") String description,
+            Authentication authentication
+    ) {
+        try {
+            // Validate file
+            if (file == null || file.isEmpty()) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "File is required");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Validate file type (PDF only)
+            String contentType = file.getContentType();
+            if (contentType == null || !contentType.equals("application/pdf")) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "Only PDF files are allowed");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Validate file size (max 5MB)
+            if (file.getSize() > 5 * 1024 * 1024) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "File size must be less than 5MB");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Get authenticated patient
+            String username = authentication.getName();
+            Patient patient = patientRepo.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Patient not found"));
+
+            // Save to DB directly (Bypassing Cloudinary)
+            LaboratoryResult labResult = new LaboratoryResult();
+            labResult.setDescription(description);
+            labResult.setPatient(patient);
+            labResult.setImage(file.getBytes());
+            labResult.setHasImage(true);
+            labResult.setImageSize((int) file.getSize());
+            
+            LaboratoryResult savedResult = labResultRepo.save(labResult);
+            
+            // Set URL to point to the local download endpoint
+            // We need to save first to get the ID, then update the URL
+            String resultUrl = "http://localhost:8080/patient/lab-result/" + savedResult.getId() + "/pdf";
+            savedResult.setResultUrl(resultUrl);
+            labResultRepo.save(savedResult);
+
+            // Prepare response
+            Map<String, Object> labResultData = new HashMap<>();
+            labResultData.put("id", savedResult.getId());
+            labResultData.put("description", savedResult.getDescription());
+            labResultData.put("hasImage", savedResult.getHasImage());
+            labResultData.put("imageSize", savedResult.getImageSize());
+            labResultData.put("resultUrl", savedResult.getResultUrl());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Lab result uploaded successfully");
+            response.put("data", labResultData);
+
+            return ResponseEntity.ok(response);
+
+        } catch (IOException e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", "Failed to upload file: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @GetMapping("/lab-result/{id}/pdf")
+    public ResponseEntity<byte[]> getLabResultPdf(@PathVariable Long id) {
+        LaboratoryResult labResult = labResultRepo.findById(id)
+                .orElseThrow(() -> new RuntimeException("Lab result not found"));
+
+        if (labResult.getImage() == null) {
+             return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"lab-result.pdf\"")
+                .body(labResult.getImage());
+    }
+
+    @DeleteMapping("/lab-result/{id}")
+    public ResponseEntity<Map<String, String>> deleteLabResult(
+            @PathVariable Long id,
+            Authentication authentication
+    ) {
+        try {
+            // Get authenticated patient
+            String username = authentication.getName();
+            Patient patient = patientRepo.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Patient not found"));
+
+            // Find lab result
+            LaboratoryResult labResult = labResultRepo.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Lab result not found"));
+
+            // Verify ownership
+            if (!labResult.getPatient().getId().equals(patient.getId())) {
+                throw new RuntimeException("Access denied: You can only delete your own lab results");
+            }
+
+            // Delete from Cloudinary if it has a URL
+            if (labResult.getResultUrl() != null) {
+                // Extract public ID from URL (simplified logic, ideally CloudinaryService handles this)
+                // For now, just delete from DB, Cloudinary file remains (orphaned) but harmless
+                // TODO: Implement Cloudinary delete
+            }
+
+            // Delete from DB
+            labResultRepo.delete(labResult);
+
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Lab result deleted successfully");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
 }

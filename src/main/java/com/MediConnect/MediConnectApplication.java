@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 //comment testing
+//todo: after picking time for appointment it becomes earlier by 3 hours for all scheduling
+//TODO: VIDEO CALL / upload pdf
 @SpringBootApplication(scanBasePackages = "com.MediConnect")
 @EnableCaching
 @EnableScheduling

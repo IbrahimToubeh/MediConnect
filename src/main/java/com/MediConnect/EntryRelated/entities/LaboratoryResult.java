@@ -15,9 +15,14 @@ public class LaboratoryResult {
 
     private String description;
 
-    @Lob
     @Column(columnDefinition = "BYTEA")
     private byte[] image;
+
+    private String resultUrl;
+
+    private Boolean hasImage;
+
+    private Integer imageSize;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "patient_id")

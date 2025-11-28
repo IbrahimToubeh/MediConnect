@@ -1,29 +1,35 @@
 package com.MediConnect.EntryRelated.controller;
 
-import com.MediConnect.EntryRelated.dto.healthprovider.GetAllSpecialtyDTO;
-import com.MediConnect.EntryRelated.dto.healthprovider.LoginHPRequestDTO;
-import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.ChangePasswordRequestDTO;
 import com.MediConnect.EntryRelated.dto.NotificationPreferencesDTO;
 import com.MediConnect.EntryRelated.dto.PrivacySettingsDTO;
-import com.MediConnect.EntryRelated.entities.HealthcareProvider;
+import com.MediConnect.EntryRelated.dto.healthprovider.GetAllSpecialtyDTO;
+import com.MediConnect.EntryRelated.dto.healthprovider.LoginHPRequestDTO;
+import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.entities.EducationHistory;
-import com.MediConnect.EntryRelated.entities.WorkExperience;
+import com.MediConnect.EntryRelated.entities.HealthcareProvider;
 import com.MediConnect.EntryRelated.entities.SpecializationType;
-import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
-import com.MediConnect.EntryRelated.service.OTPService;
+import com.MediConnect.EntryRelated.entities.WorkExperience;
 import com.MediConnect.EntryRelated.service.ActivityService;
 import com.MediConnect.EntryRelated.service.NotificationPreferencesService;
+import com.MediConnect.EntryRelated.service.OTPService;
 import com.MediConnect.EntryRelated.service.PrivacySettingsService;
+import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
 import com.MediConnect.Service.UserService;
+import com.MediConnect.socialmedia.service.CloudinaryService;
 import com.MediConnect.config.JWTService;
+import com.MediConnect.EntryRelated.repository.HealthcareProviderRepo;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.MediaType;
+import org.springframework.http.HttpHeaders;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
@@ -44,7 +50,8 @@ public class HealthProviderController {
     private final ActivityService activityService;
     private final NotificationPreferencesService notificationPreferencesService;
     private final PrivacySettingsService privacySettingsService;
-
+    private final CloudinaryService cloudinaryService;
+    private final HealthcareProviderRepo healthcareProviderRepo;
 
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> login(
@@ -842,4 +849,131 @@ public class HealthProviderController {
         }
     }
      */
+
+    /**
+     * Upload credential document PDF file
+     * @param file The PDF file to upload
+     * @param authentication The authenticated user
+     * @return Response with updated provider details including licenseDocumentUrl
+     */
+    @PostMapping("/document/upload")
+    public ResponseEntity<Map<String, Object>> uploadCredentialDocument(
+            @RequestParam("file") MultipartFile file,
+            org.springframework.security.core.Authentication authentication
+    ) {
+        try {
+            // Validate file
+            if (file == null || file.isEmpty()) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "File is required");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Validate file type (PDF only)
+            String contentType = file.getContentType();
+            if (contentType == null || !contentType.equals("application/pdf")) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "Only PDF files are allowed");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Validate file size (max 5MB)
+            if (file.getSize() > 5 * 1024 * 1024) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "File size must be less than 5MB");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Get authenticated healthcare provider
+            String username = authentication.getName();
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));            if (provider == null) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "Healthcare provider not found");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+            }
+
+            // Upload file to Cloudinary
+            String documentUrl = cloudinaryService.uploadFile(file, "mediconnect/doctor-credentials");
+
+            // Update provider's license document URL
+            provider.setLicenseDocumentUrl(documentUrl);
+            healthcareProviderService.save(provider);
+
+            // Prepare response
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Credential document uploaded successfully");
+            response.put("licenseDocumentUrl", documentUrl);
+
+            return ResponseEntity.ok(response);
+
+        } catch (IOException e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", "Failed to upload file: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+    @PostMapping("/upload-license")
+    public ResponseEntity<Map<String, Object>> uploadLicense(
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        try {
+            String token = request.getHeader("Authorization").substring(7);
+            String username = jwtService.extractUserName(token);
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Provider not found"));
+
+            provider.setLicenseDocument(file.getBytes());
+            provider.setLicenseDocumentContentType(file.getContentType());
+            
+            // Set URL to point to the local download endpoint
+            String resultUrl = "http://localhost:8080/healthprovider/license/view";
+            provider.setLicenseDocumentUrl(resultUrl);
+            
+            healthcareProviderRepo.save(provider);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "License uploaded successfully");
+            response.put("url", resultUrl);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+             Map<String, Object> error = new HashMap<>();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    @GetMapping("/license/view")
+    public ResponseEntity<byte[]> viewLicense(HttpServletRequest request) {
+        try {
+            String token = request.getHeader("Authorization").substring(7);
+            String username = jwtService.extractUserName(token);
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Provider not found"));
+
+            if (provider.getLicenseDocument() == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(provider.getLicenseDocumentContentType()))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"license.pdf\"")
+                    .body(provider.getLicenseDocument());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
 }

@@ -10,4 +10,5 @@ public class LabResultResponseDTO {
     private String description;
     private boolean hasImage;
     private int imageSize;
+    private String resultUrl;
 }

@@ -47,6 +47,18 @@ public class CloudinaryService {
      * @throws IOException If upload fails
      */
     public String uploadFile(MultipartFile file) throws IOException {
+        return uploadFile(file, "mediconnect/posts");
+    }
+
+    /**
+     * Upload a file to Cloudinary with a specific folder
+     * 
+     * @param file The file to upload
+     * @param folder The folder to upload to
+     * @return The public URL of the uploaded file
+     * @throws IOException If upload fails
+     */
+    public String uploadFile(MultipartFile file, String folder) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File cannot be null or empty");
         }
@@ -56,17 +68,35 @@ public class CloudinaryService {
             throw new IllegalArgumentException("File size must be less than 10MB");
         }
 
-        // Determine resource type based on file content type
-        String resourceType = "auto"; // Cloudinary will auto-detect image or video
+        // Determine resource type based on file content type and filename
+        // Use 'auto' to let Cloudinary detect file type. 
+        // For PDFs, it will be treated as image-like (public) and extension added automatically.
+        String resourceType = "auto"; 
         
+        // Generate a unique filename with extension
+        String originalFilename = file.getOriginalFilename();
+        String extension = "";
+        if (originalFilename != null && originalFilename.lastIndexOf(".") > 0) {
+            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+        }
+        
+        // For PDFs, we do NOT want to force extension in public_id if using 'auto', 
+        // because Cloudinary adds it automatically.
+        // But for other files, we might want to keep original extension if needed.
+        // Actually, for 'auto', Cloudinary usually handles extensions.
+        // Let's just use UUID as public_id and let Cloudinary add extension.
+        
+        String publicId = java.util.UUID.randomUUID().toString();
+
         // Upload options
         @SuppressWarnings("unchecked")
         Map<String, Object> uploadOptions = (Map<String, Object>) ObjectUtils.asMap(
             "resource_type", resourceType,
-            "folder", "mediconnect/posts", // Organize uploads in a folder
-            "overwrite", false, // Don't overwrite existing files
-            "use_filename", true, // Use original filename
-            "unique_filename", true // Add unique suffix to avoid conflicts
+            "type", "upload", 
+            "folder", folder, 
+            "public_id", publicId,
+            "format", "pdf", // Force format to PDF
+            "overwrite", false
         );
 
         try {

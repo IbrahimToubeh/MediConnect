@@ -11,6 +11,7 @@ import com.MediConnect.socialmedia.entity.ChatMessage;
 import com.MediConnect.socialmedia.repository.ChatChannelRepository;
 import com.MediConnect.socialmedia.repository.ChatMessageRepository;
 import com.MediConnect.socialmedia.service.NotificationService;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +42,7 @@ public class ChatService {
     private final PatientRepo patientRepo;
     private final HealthcareProviderRepo healthcareProviderRepo;
     private final NotificationService notificationService;
+    private final SimpMessagingTemplate messagingTemplate;
     
     @PersistenceContext
     private EntityManager entityManager;
@@ -215,6 +217,16 @@ public class ChatService {
             ChatMessage savedMessage = messageRepository.save(message);
             
             System.out.println("DEBUG CHAT SERVICE: Message saved successfully - ID: " + savedMessage.getId());
+            
+            // BROADCAST: Send message to WebSocket subscribers
+            try {
+                Map<String, Object> messageMap = convertMessageToMap(savedMessage);
+                messagingTemplate.convertAndSend("/topic/chat/" + channelId, messageMap);
+                System.out.println("DEBUG CHAT SERVICE: Broadcasted message to /topic/chat/" + channelId);
+            } catch (Exception e) {
+                System.err.println("ERROR CHAT SERVICE: Failed to broadcast message: " + e.getMessage());
+                e.printStackTrace();
+            }
             
             // NOTIFICATION: Send notification to the recipient (the other person in the chat)
             // The recipient is whoever is NOT the sender (patient if doctor sent, doctor if patient sent)

@@ -19,6 +19,13 @@ public class HealthcareProvider extends Users {
     private List<SpecializationType> specializations;
 
     private String licenseNumber;
+    private String licenseDocumentUrl;
+    
+    @Column(columnDefinition = "BYTEA")
+    private byte[] licenseDocument;
+
+    private String licenseDocumentContentType;
+
     private String clinicName;
 
     @Column(columnDefinition = "TEXT")

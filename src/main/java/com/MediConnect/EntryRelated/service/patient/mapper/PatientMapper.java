@@ -20,6 +20,7 @@ public interface PatientMapper {
     @Mapping(target = "registrationDate", expression = "java(new java.util.Date())")
     @Mapping(target = "medications", source = "medications")
     @Mapping(target = "mentalHealthMedications", source = "mentalHealthMedications")
+    @Mapping(target = "laboratoryResults", source = "laboratoryResults")
     Patient signupDtoToPatient(SignupPatientRequestDTO dto);
 
     // 2️⃣ Map from Patient entity → Profile DTO
@@ -29,7 +30,7 @@ public interface PatientMapper {
 
     // 3️⃣ AfterMapping hook to set bidirectional relationships
     @AfterMapping
-    default void setPatientInMedications(@MappingTarget Patient patient) {
+    default void setPatientInCollections(@MappingTarget Patient patient) {
         if (patient.getMedications() != null) {
             for (Medication medication : patient.getMedications()) {
                 medication.setPatient(patient);
@@ -39,6 +40,12 @@ public interface PatientMapper {
         if (patient.getMentalHealthMedications() != null) {
             for (MentalHealthMedication medication : patient.getMentalHealthMedications()) {
                 medication.setPatient(patient);
+            }
+        }
+
+        if (patient.getLaboratoryResults() != null) {
+            for (com.MediConnect.EntryRelated.entities.LaboratoryResult result : patient.getLaboratoryResults()) {
+                result.setPatient(patient);
             }
         }
     }

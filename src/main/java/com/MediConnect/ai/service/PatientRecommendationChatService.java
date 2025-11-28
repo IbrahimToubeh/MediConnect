@@ -177,7 +177,6 @@ public class PatientRecommendationChatService {
             return;
         }
 
-        // Use the most recent patient utterance to look for insurance and location hints.
         ChatMessageDTO lastUserMessage = null;
         for (int i = messages.size() - 1; i >= 0; i--) {
             ChatMessageDTO message = messages.get(i);
@@ -221,14 +220,17 @@ public class PatientRecommendationChatService {
 
         // If user references a state or country directly, capture it.
         if (isBlank(context.getState())) {
-            String detectedState = findStateReference(content);
+            String detectedState = findStateReference(content, providers);
             if (detectedState != null) {
                 context.setState(detectedState);
             }
         }
 
-        if (isBlank(context.getCountry()) && content.contains("jordan")) {
-            context.setCountry("Jordan");
+        if (isBlank(context.getCountry())) {
+            String detectedCountry = findCountryReference(content, providers);
+            if (detectedCountry != null) {
+                context.setCountry(detectedCountry);
+            }
         }
 
         if (isBlank(context.getPreferredSpecialization())) {
@@ -305,21 +307,42 @@ public class PatientRecommendationChatService {
         return tokens;
     }
 
-    private String findStateReference(String message) {
-        if (isBlank(message)) {
+    private String findStateReference(String message, List<HealthcareProvider> providers) {
+        if (isBlank(message) || CollectionUtils.isEmpty(providers)) {
             return null;
         }
-        String lower = message.toLowerCase(Locale.ROOT);
-        if (lower.contains("amman")) {
-            return "Amman";
+
+        String lowerCaseMessage = message.toLowerCase(Locale.ROOT);
+
+        return providers.stream()
+                .map(HealthcareProvider::getState)
+                .filter(this::isNotBlank)
+                .map(String::trim)
+                .distinct()
+                .filter(state -> lowerCaseMessage.contains(state.toLowerCase(Locale.ROOT)))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean isNotBlank(String value) {
+        return !isBlank(value);
+    }
+
+    private String findCountryReference(String message, List<HealthcareProvider> providers) {
+        if (isBlank(message) || CollectionUtils.isEmpty(providers)) {
+            return null;
         }
-        if (lower.contains("irbid")) {
-            return "Irbid";
-        }
-        if (lower.contains("aqaba")) {
-            return "Aqaba";
-        }
-        return null;
+
+        String lowerCaseMessage = message.toLowerCase(Locale.ROOT);
+
+        return providers.stream()
+                .map(HealthcareProvider::getCountry)
+                .filter(this::isNotBlank)
+                .map(String::trim)
+                .distinct()
+                .filter(country -> lowerCaseMessage.contains(country.toLowerCase(Locale.ROOT)))
+                .findFirst()
+                .orElse(null);
     }
 
     private List<ChatMessageDTO> truncateHistory(List<ChatMessageDTO> messages) {
@@ -603,7 +626,7 @@ public class PatientRecommendationChatService {
         List<HealthcareProvider> activeProviders = providers.stream()
                 .filter(provider -> provider.getAccountStatus() == AccountStatus.ACTIVE)
                 .filter(provider -> !Boolean.TRUE.equals(provider.getAdminFlagged()))
-                .collect(Collectors.toList());
+                .toList();
 
         Map<Long, Set<String>> providerInsuranceMap = activeProviders.stream()
                 .collect(Collectors.toMap(
@@ -938,8 +961,8 @@ public class PatientRecommendationChatService {
     }
 
     private RecommendationOutcome buildRankedRecommendations(PatientContextDTO context,
-                                                              List<DoctorSuggestionDTO> catalogue,
-                                                              boolean includeDoctorScoring) {
+                                                             List<DoctorSuggestionDTO> catalogue,
+                                                             boolean includeDoctorScoring) {
         RecommendationOutcome outcome = new RecommendationOutcome();
         if (catalogue == null || catalogue.isEmpty()) {
             return outcome;

@@ -83,7 +83,7 @@ public class ChatController {
                     List<AppointmentEntity> confirmedAppointments = appointmentRepository.findByPatientId(patient.getId())
                         .stream()
                         .filter(apt -> apt.getStatus() == AppointmentStatus.CONFIRMED)
-                        .collect(java.util.stream.Collectors.toList());
+                        .toList();
                     
                     for (AppointmentEntity apt : confirmedAppointments) {
                         try {

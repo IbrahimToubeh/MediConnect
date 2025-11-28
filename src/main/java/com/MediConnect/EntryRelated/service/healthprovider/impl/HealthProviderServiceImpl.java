@@ -71,6 +71,11 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
             provider.setPassword(passwordEncoder.encode(dto.getPassword()));
             // Newly registered doctors must be reviewed by an admin before accessing the platform.
             provider.setAccountStatus(AccountStatus.PENDING);
+            
+            // Set license document URL if provided
+            if (dto.getLicenseDocumentUrl() != null && !dto.getLicenseDocumentUrl().isEmpty()) {
+                provider.setLicenseDocumentUrl(dto.getLicenseDocumentUrl());
+            }
         
         // Convert date of birth from string to Date
         if (dto.getDateOfBirth() != null && !dto.getDateOfBirth().isEmpty()) {

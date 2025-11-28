@@ -46,6 +46,7 @@ public class SignupHPRequestDTO {
     private String bio;
     private String clinicName;
     private String licenseNumber;
+    private String licenseDocumentUrl;
     private List<String> availableDays;
     private String availableTimeStart;
     private String availableTimeEnd;

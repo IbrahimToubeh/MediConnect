@@ -13,7 +13,7 @@ import java.util.Map;
 
 /**
  * Appointment REST Controller
- * 
+ *
  * Endpoints for appointment management:
  * - POST /appointments/book - Patient books an appointment (triggers notification to doctor)
  * - GET /appointments/patient - Get patient's appointments
@@ -27,7 +27,6 @@ import java.util.Map;
 public class AppointmentController {
 
     private final AppointmentService appointmentService;
-    private final AppointmentServiceImpl appointmentServiceImpl;
 
     /**
      * Endpoint for patients to book appointments.
@@ -111,13 +110,13 @@ public class AppointmentController {
     /**
      * Get available time slots for a doctor on a specific date.
      * Checks confirmed appointments and returns slots with availability status.
-     * 
+     *
      * Query parameters:
      * - doctorId: The doctor's ID
      * - date: The date to check (YYYY-MM-DD format)
      * - startTime: Doctor's available start time (HH:mm format)
      * - endTime: Doctor's available end time (HH:mm format)
-     * 
+     *
      * Returns: List of time slots with availability status
      */
     @GetMapping("/available-slots")
@@ -143,10 +142,10 @@ public class AppointmentController {
     /**
      * Endpoint for doctors to update appointment status (confirm, cancel, or reschedule).
      * When called, automatically sends notification to the patient.
-     * 
+     *
      * Status values: "CONFIRMED", "CANCELLED", or "RESCHEDULED"
      * If status is "RESCHEDULED", newAppointmentDateTime must be provided with the new time.
-     * 
+     *
      * Request body: { status, doctorNotes (optional), newAppointmentDateTime (required if rescheduling) }
      */
     @PutMapping("/{id}/status")
@@ -166,10 +165,10 @@ public class AppointmentController {
             // Extract status and optional parameters
             // newAppointmentDateTime is required when status is "RESCHEDULED"
             String status = body.get("status") != null ? body.get("status").toString() : "";
-            String note = body.get("doctorNotes") != null ? body.get("doctorNotes").toString() : 
+            String note = body.get("doctorNotes") != null ? body.get("doctorNotes").toString() :
                          (body.get("note") != null ? body.get("note").toString() : null);
             String newDateTime = body.get("newAppointmentDateTime") != null ? body.get("newAppointmentDateTime").toString() : null;
-            
+
             Map<String, Object> response = appointmentService.updateAppointmentStatus(authHeader, id, status, note, newDateTime);
             if ("error".equals(response.get("status"))) {
                 return ResponseEntity.badRequest().body(response);
@@ -186,7 +185,7 @@ public class AppointmentController {
     /**
      * Endpoint for patients to respond to a reschedule request from the doctor.
      * When called, automatically sends notification to the doctor about the response.
-     * 
+     *
      * Action values: "confirm" (accept new time) or "cancel" (reject and cancel appointment)
      * Only works if appointment status is currently RESCHEDULED.
      */
@@ -219,10 +218,10 @@ public class AppointmentController {
 
     /**
      * Endpoint for doctors to complete an appointment after the patient visit.
-     * 
+     *
      * Marks the appointment as COMPLETED, adds notes, and optionally creates a follow-up appointment.
      * Only works for appointments with status CONFIRMED (upcoming appointments).
-     * 
+     *
      * Request body: { notes (optional), followUpDateTime (optional, ISO format string) }
      */
     @PutMapping("/{id}/complete")
@@ -272,7 +271,7 @@ public class AppointmentController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
             }
 
-            Map<String, Object> response = appointmentServiceImpl.startCall(authHeader, id);
+            Map<String, Object> response = appointmentService.startCall(authHeader, id);
             if ("error".equals(response.get("status"))) {
                 return ResponseEntity.badRequest().body(response);
             }
@@ -302,7 +301,7 @@ public class AppointmentController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
             }
 
-            Map<String, Object> response = appointmentServiceImpl.endCall(authHeader, id);
+            Map<String, Object> response = appointmentService.endCall(authHeader, id);
             if ("error".equals(response.get("status"))) {
                 return ResponseEntity.badRequest().body(response);
             }
