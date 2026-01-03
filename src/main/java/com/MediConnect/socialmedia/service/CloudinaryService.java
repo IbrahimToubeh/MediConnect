@@ -69,35 +69,45 @@ public class CloudinaryService {
         }
 
         // Determine resource type based on file content type and filename
-        // Use 'auto' to let Cloudinary detect file type. 
-        // For PDFs, it will be treated as image-like (public) and extension added automatically.
-        String resourceType = "auto"; 
-        
-        // Generate a unique filename with extension
         String originalFilename = file.getOriginalFilename();
-        String extension = "";
-        if (originalFilename != null && originalFilename.lastIndexOf(".") > 0) {
-            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+        String contentType = file.getContentType();
+        
+        // Detect file type
+        String resourceType = "auto"; // Let Cloudinary auto-detect
+        boolean isPdf = false;
+        
+        if (originalFilename != null) {
+            String lowerFilename = originalFilename.toLowerCase();
+            isPdf = lowerFilename.endsWith(".pdf");
         }
         
-        // For PDFs, we do NOT want to force extension in public_id if using 'auto', 
-        // because Cloudinary adds it automatically.
-        // But for other files, we might want to keep original extension if needed.
-        // Actually, for 'auto', Cloudinary usually handles extensions.
-        // Let's just use UUID as public_id and let Cloudinary add extension.
+        if (contentType != null && contentType.equals("application/pdf")) {
+            isPdf = true;
+        }
         
+        // For PDFs, use 'raw' resource type to ensure proper handling
+        if (isPdf) {
+            resourceType = "raw";
+        }
+        
+        // Generate a unique filename
         String publicId = java.util.UUID.randomUUID().toString();
 
-        // Upload options
+        // Upload options - ensure public access
         @SuppressWarnings("unchecked")
         Map<String, Object> uploadOptions = (Map<String, Object>) ObjectUtils.asMap(
             "resource_type", resourceType,
             "type", "upload", 
             "folder", folder, 
             "public_id", publicId,
-            "format", "pdf", // Force format to PDF
+            "access_mode", "public", // Ensure public access
             "overwrite", false
         );
+        
+        // Only add format for PDFs when using raw resource type
+        if (isPdf && resourceType.equals("raw")) {
+            uploadOptions.put("format", "pdf");
+        }
 
         try {
             // Upload file to Cloudinary

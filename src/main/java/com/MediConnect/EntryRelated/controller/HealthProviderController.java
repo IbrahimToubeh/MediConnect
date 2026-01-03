@@ -8,6 +8,7 @@ import com.MediConnect.EntryRelated.dto.healthprovider.LoginHPRequestDTO;
 import com.MediConnect.EntryRelated.dto.healthprovider.SignupHPRequestDTO;
 import com.MediConnect.EntryRelated.entities.EducationHistory;
 import com.MediConnect.EntryRelated.entities.HealthcareProvider;
+import com.MediConnect.EntryRelated.entities.ProfileView;
 import com.MediConnect.EntryRelated.entities.SpecializationType;
 import com.MediConnect.EntryRelated.entities.WorkExperience;
 import com.MediConnect.EntryRelated.service.ActivityService;
@@ -15,10 +16,21 @@ import com.MediConnect.EntryRelated.service.NotificationPreferencesService;
 import com.MediConnect.EntryRelated.service.OTPService;
 import com.MediConnect.EntryRelated.service.PrivacySettingsService;
 import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
+import com.MediConnect.EntryRelated.service.review.ReviewService;
 import com.MediConnect.Service.UserService;
 import com.MediConnect.socialmedia.service.CloudinaryService;
 import com.MediConnect.config.JWTService;
 import com.MediConnect.EntryRelated.repository.HealthcareProviderRepo;
+import com.MediConnect.EntryRelated.repository.PatientRepo;
+import com.MediConnect.EntryRelated.repository.ProfileViewRepository;
+import com.MediConnect.EntryRelated.repository.DayAvailabilityRepository;
+import com.MediConnect.EntryRelated.repository.BlockedTimeSlotRepository;
+import com.MediConnect.EntryRelated.entities.DayAvailability;
+import com.MediConnect.EntryRelated.entities.BlockedTimeSlot;
+import com.MediConnect.EntryRelated.dto.healthprovider.ScheduleUpdateDTO;
+import com.MediConnect.EntryRelated.dto.healthprovider.DayAvailabilityDTO;
+import com.MediConnect.EntryRelated.dto.healthprovider.BlockedTimeSlotDTO;
+import com.MediConnect.Repos.UserRepo;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -27,6 +39,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpHeaders;
+import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
@@ -52,6 +65,14 @@ public class HealthProviderController {
     private final PrivacySettingsService privacySettingsService;
     private final CloudinaryService cloudinaryService;
     private final HealthcareProviderRepo healthcareProviderRepo;
+    private final ReviewService reviewService;
+    private final ProfileViewRepository profileViewRepository;
+    private final PatientRepo patientRepo;
+    private final UserRepo userRepo;
+    private final com.MediConnect.EntryRelated.repository.LabResultRepo labResultRepo;
+    private final com.MediConnect.EntryRelated.repository.AppointmentRepository appointmentRepository;
+    private final DayAvailabilityRepository dayAvailabilityRepository;
+    private final BlockedTimeSlotRepository blockedTimeSlotRepository;
 
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> login(
@@ -83,6 +104,30 @@ public class HealthProviderController {
         }
     }
 
+
+    @GetMapping("/check-username")
+    public ResponseEntity<Map<String, Object>> checkUsername(@RequestParam String username) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            // Check if username exists in any user table (patient, healthcare provider, or admin)
+            boolean exists = patientRepo.existsByUsername(username) 
+                    || healthcareProviderRepo.existsByUsername(username)
+                    || userRepo.existsByUsername(username);
+            
+            response.put("status", "success");
+            response.put("available", !exists);
+            if (exists) {
+                response.put("message", "Username already exists");
+            } else {
+                response.put("message", "Username is available");
+            }
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            response.put("status", "error");
+            response.put("message", "Error checking username availability");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
 
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(@Valid @RequestBody SignupHPRequestDTO healthProviderInfo) {
@@ -126,6 +171,42 @@ public class HealthProviderController {
             response.put("status", "error");
             response.put("message", e.getMessage());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+    }
+
+    /**
+     * Track a profile view for analytics.
+     * 
+     * This endpoint is called when someone views a doctor's public profile.
+     * It records the view with a timestamp for analytics purposes.
+     * 
+     * @param id The ID of the healthcare provider whose profile was viewed
+     * @return Success response
+     */
+    @PostMapping("/track-view/{id}")
+    public ResponseEntity<Map<String, Object>> trackProfileView(@PathVariable Long id) {
+        try {
+            // Verify doctor exists
+            if (!healthcareProviderRepo.existsById(id)) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "Doctor not found");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+            }
+            
+            // Create and save a new profile view record
+            ProfileView profileView = new ProfileView(id);
+            profileViewRepository.save(profileView);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Profile view tracked");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
         }
     }
 
@@ -225,6 +306,23 @@ public class HealthProviderController {
         profile.put("availableDays", provider.getAvailableDays());
         profile.put("availableTimeStart", provider.getAvailableTimeStart());
         profile.put("availableTimeEnd", provider.getAvailableTimeEnd());
+        profile.put("appointmentDurationMinutes", provider.getAppointmentDurationMinutes() != null 
+                ? provider.getAppointmentDurationMinutes() : 30);
+        
+        // Include day availabilities for detailed schedule
+        List<DayAvailability> dayAvailabilities = dayAvailabilityRepository.findByProvider(provider);
+        List<Map<String, Object>> availabilityList = dayAvailabilities.stream()
+                .map(av -> {
+                    Map<String, Object> avMap = new HashMap<>();
+                    avMap.put("dayOfWeek", av.getDayOfWeek());
+                    avMap.put("enabled", av.getEnabled());
+                    avMap.put("startTime", av.getStartTime());
+                    avMap.put("endTime", av.getEndTime());
+                    return avMap;
+                })
+                .collect(Collectors.toList());
+        profile.put("dayAvailabilities", availabilityList);
+        
         profile.put("insuranceAccepted", provider.getInsuranceAccepted() != null ? provider.getInsuranceAccepted() : new java.util.ArrayList<>());
         profile.put("profilePicture", provider.getProfilePicture());
         profile.put("bannerPicture", provider.getBannerPicture());
@@ -441,7 +539,7 @@ public class HealthProviderController {
             
             System.out.println("DEBUG SEARCH: Found " + providers.size() + " providers");
             
-            // Convert to response DTOs
+            // Convert to response DTOs with real ratings
             List<Map<String, Object>> response = providers.stream()
                 .map(provider -> {
                     Map<String, Object> providerMap = new HashMap<>();
@@ -456,9 +554,22 @@ public class HealthProviderController {
                     providerMap.put("insuranceAccepted", provider.getInsuranceAccepted());
                     providerMap.put("bio", provider.getBio());
                     
-                    // Add mock rating (consistent with search filter logic)
-                    double mockRating = 3.5 + (provider.getId() % 15) * 0.1; // Ratings between 3.5-5.0
-                    providerMap.put("rating", mockRating);
+                    // Fetch real rating from ReviewService
+                    try {
+                        Map<String, Object> ratingData = reviewService.getDoctorRating(provider.getId());
+                        if ("success".equals(ratingData.get("status"))) {
+                            Object avgRating = ratingData.get("averageRating");
+                            double rating = (avgRating != null) ? ((Number) avgRating).doubleValue() : 0.0;
+                            providerMap.put("rating", rating);
+                        } else {
+                            // If error, default to 0.0
+                            providerMap.put("rating", 0.0);
+                        }
+                    } catch (Exception e) {
+                        // If exception occurs, default to 0.0
+                        System.out.println("Error fetching rating for doctor " + provider.getId() + ": " + e.getMessage());
+                        providerMap.put("rating", 0.0);
+                    }
                     
                     return providerMap;
                 })
@@ -715,6 +826,23 @@ public class HealthProviderController {
         profile.put("availableDays", provider.getAvailableDays());
         profile.put("availableTimeStart", provider.getAvailableTimeStart());
         profile.put("availableTimeEnd", provider.getAvailableTimeEnd());
+        profile.put("appointmentDurationMinutes", provider.getAppointmentDurationMinutes() != null 
+                ? provider.getAppointmentDurationMinutes() : 30);
+        
+        // Include day availabilities for detailed schedule
+        List<DayAvailability> dayAvailabilities = dayAvailabilityRepository.findByProvider(provider);
+        List<Map<String, Object>> availabilityList = dayAvailabilities.stream()
+                .map(av -> {
+                    Map<String, Object> avMap = new HashMap<>();
+                    avMap.put("dayOfWeek", av.getDayOfWeek());
+                    avMap.put("enabled", av.getEnabled());
+                    avMap.put("startTime", av.getStartTime());
+                    avMap.put("endTime", av.getEndTime());
+                    return avMap;
+                })
+                .collect(Collectors.toList());
+        profile.put("dayAvailabilities", availabilityList);
+        
         profile.put("insuranceAccepted", provider.getInsuranceAccepted() != null ? provider.getInsuranceAccepted() : new java.util.ArrayList<>());
         profile.put("profilePicture", provider.getProfilePicture());
         profile.put("bannerPicture", provider.getBannerPicture());
@@ -974,6 +1102,318 @@ public class HealthProviderController {
                     .body(provider.getLicenseDocument());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /**
+     * Endpoint for doctors to view lab result PDFs from patient medical records.
+     * Verifies that:
+     * 1. Doctor is authenticated
+     * 2. Lab result belongs to a patient who has an appointment with the doctor
+     * 3. Medical records were shared for that appointment
+     */
+    @GetMapping("/appointment/{appointmentId}/lab-result/{labResultId}/pdf")
+    public ResponseEntity<byte[]> getLabResultPdfForDoctor(
+            @PathVariable Integer appointmentId,
+            @PathVariable Long labResultId,
+            HttpServletRequest request) {
+        try {
+            // Extract JWT token
+            String authHeader = request.getHeader("Authorization");
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            }
+
+            String jwtToken = authHeader.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+
+            // Get authenticated doctor
+            HealthcareProvider doctor = healthcareProviderRepo.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Doctor not found"));
+
+            // Get appointment
+            com.MediConnect.Entities.AppointmentEntity appointment = appointmentRepository.findById(appointmentId)
+                    .orElseThrow(() -> new RuntimeException("Appointment not found"));
+
+            // Verify appointment belongs to this doctor
+            if (!appointment.getHealthcareProvider().getId().equals(doctor.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
+            // Verify medical records were shared
+            if (!Boolean.TRUE.equals(appointment.getShareMedicalRecords())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
+            // Get lab result
+            com.MediConnect.EntryRelated.entities.LaboratoryResult labResult = labResultRepo.findById(labResultId)
+                    .orElseThrow(() -> new RuntimeException("Lab result not found"));
+
+            // Verify lab result belongs to the patient in the appointment
+            if (!labResult.getPatient().getId().equals(appointment.getPatient().getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
+            // Check if PDF exists
+            if (labResult.getImage() == null || labResult.getImage().length == 0) {
+                return ResponseEntity.notFound().build();
+            }
+
+            // Return PDF
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_PDF)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"lab-result-" + labResultId + ".pdf\"")
+                    .body(labResult.getImage());
+
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    // ==================== SCHEDULE MANAGEMENT ENDPOINTS ====================
+
+    /**
+     * Get doctor's schedule (day availabilities and appointment duration)
+     */
+    @GetMapping("/schedule")
+    public ResponseEntity<Map<String, Object>> getSchedule(
+            @RequestHeader("Authorization") String token) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+
+            // Get day availabilities
+            List<DayAvailability> availabilities = dayAvailabilityRepository.findByProvider(provider);
+            List<Map<String, Object>> availabilityList = availabilities.stream()
+                    .map(av -> {
+                        Map<String, Object> avMap = new HashMap<>();
+                        avMap.put("dayOfWeek", av.getDayOfWeek());
+                        avMap.put("enabled", av.getEnabled());
+                        avMap.put("startTime", av.getStartTime());
+                        avMap.put("endTime", av.getEndTime());
+                        return avMap;
+                    })
+                    .collect(Collectors.toList());
+
+            Map<String, Object> schedule = new HashMap<>();
+            schedule.put("dayAvailabilities", availabilityList);
+            schedule.put("appointmentDurationMinutes", provider.getAppointmentDurationMinutes() != null 
+                    ? provider.getAppointmentDurationMinutes() : 30);
+
+            response.put("data", schedule);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * Update doctor's schedule (day availabilities and appointment duration)
+     */
+    @PutMapping("/schedule")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> updateSchedule(
+            @RequestHeader("Authorization") String token,
+            @RequestBody ScheduleUpdateDTO scheduleUpdate) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            // Update appointment duration
+            if (scheduleUpdate.getAppointmentDurationMinutes() != null) {
+                provider.setAppointmentDurationMinutes(scheduleUpdate.getAppointmentDurationMinutes());
+                healthcareProviderService.save(provider);
+            }
+
+            // Update day availabilities
+            if (scheduleUpdate.getDayAvailabilities() != null) {
+                // Delete existing availabilities
+                dayAvailabilityRepository.deleteByProvider(provider);
+                // Flush to ensure delete is executed before inserts
+                dayAvailabilityRepository.flush();
+
+                // Create new availabilities
+                for (DayAvailabilityDTO dto : scheduleUpdate.getDayAvailabilities()) {
+                    DayAvailability availability = new DayAvailability();
+                    availability.setProvider(provider);
+                    availability.setDayOfWeek(dto.getDayOfWeek());
+                    availability.setEnabled(dto.getEnabled() != null ? dto.getEnabled() : true);
+                    availability.setStartTime(dto.getStartTime());
+                    availability.setEndTime(dto.getEndTime());
+                    dayAvailabilityRepository.save(availability);
+                }
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Schedule updated successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * Get blocked time slots for a doctor
+     */
+    @GetMapping("/blocked-slots")
+    public ResponseEntity<Map<String, Object>> getBlockedSlots(
+            @RequestHeader("Authorization") String token,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            List<BlockedTimeSlot> blockedSlots;
+            if (startDate != null && endDate != null) {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+                Date start = sdf.parse(startDate);
+                Date end = sdf.parse(endDate);
+                blockedSlots = blockedTimeSlotRepository.findByProviderAndDateRange(provider, start, end);
+            } else {
+                blockedSlots = blockedTimeSlotRepository.findByProvider(provider);
+            }
+
+            List<Map<String, Object>> slotList = blockedSlots.stream()
+                    .map(slot -> {
+                        Map<String, Object> slotMap = new HashMap<>();
+                        slotMap.put("id", slot.getId());
+                        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+                        slotMap.put("date", sdf.format(slot.getBlockedDate()));
+                        slotMap.put("startTime", slot.getStartTime());
+                        slotMap.put("endTime", slot.getEndTime());
+                        slotMap.put("reason", slot.getReason());
+                        return slotMap;
+                    })
+                    .collect(Collectors.toList());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("data", slotList);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * Add a blocked time slot
+     */
+    @PostMapping("/blocked-slots")
+    public ResponseEntity<Map<String, Object>> addBlockedSlot(
+            @RequestHeader("Authorization") String token,
+            @RequestBody BlockedTimeSlotDTO blockedSlotDTO) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            BlockedTimeSlot blockedSlot = new BlockedTimeSlot();
+            blockedSlot.setProvider(provider);
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+            blockedSlot.setBlockedDate(sdf.parse(blockedSlotDTO.getDate()));
+            blockedSlot.setStartTime(blockedSlotDTO.getStartTime());
+            
+            // If end time is not provided, calculate it based on appointment duration
+            String endTime = blockedSlotDTO.getEndTime();
+            if (endTime == null || endTime.isEmpty()) {
+                Integer duration = provider.getAppointmentDurationMinutes();
+                if (duration == null) {
+                    duration = 30; // Default to 30 minutes
+                }
+                
+                // Calculate end time by adding duration to start time
+                String[] startParts = blockedSlotDTO.getStartTime().split(":");
+                int startHour = Integer.parseInt(startParts[0]);
+                int startMinute = Integer.parseInt(startParts[1]);
+                
+                int totalMinutes = startHour * 60 + startMinute + duration;
+                int endHour = totalMinutes / 60;
+                int endMinute = totalMinutes % 60;
+                
+                // Handle overflow to next day (shouldn't happen in practice, but just in case)
+                if (endHour >= 24) {
+                    endHour = endHour % 24;
+                }
+                
+                endTime = String.format("%02d:%02d", endHour, endMinute);
+            }
+            
+            blockedSlot.setEndTime(endTime);
+            blockedSlot.setReason(blockedSlotDTO.getReason());
+
+            blockedTimeSlotRepository.save(blockedSlot);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Time slot blocked successfully");
+            response.put("data", Map.of("id", blockedSlot.getId()));
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * Remove a blocked time slot
+     */
+    @DeleteMapping("/blocked-slots/{id}")
+    public ResponseEntity<Map<String, Object>> removeBlockedSlot(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long id) {
+        try {
+            String jwtToken = token.replace("Bearer ", "");
+            String username = jwtService.extractUserName(jwtToken);
+            HealthcareProvider provider = healthcareProviderService.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Healthcare provider not found"));
+
+            BlockedTimeSlot blockedSlot = blockedTimeSlotRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Blocked time slot not found"));
+
+            // Verify ownership
+            if (!blockedSlot.getProvider().getId().equals(provider.getId())) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "error");
+                response.put("message", "Unauthorized");
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+            }
+
+            blockedTimeSlotRepository.delete(blockedSlot);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "Blocked time slot removed successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "error");
+            response.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
         }
     }
 }

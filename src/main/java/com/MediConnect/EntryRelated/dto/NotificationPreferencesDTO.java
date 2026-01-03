@@ -20,6 +20,7 @@ public class NotificationPreferencesDTO {
     // Social media notifications
     private Boolean postLikes = true;
     private Boolean postComments = true;
+    private Boolean commentLikes = true;
     private Boolean commentReplies = true;
     
     // Healthcare notifications

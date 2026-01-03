@@ -45,6 +45,7 @@ public class NotificationPreferencesService {
         preferences.setPushNotifications(dto.getPushNotifications());
         preferences.setPostLikes(dto.getPostLikes());
         preferences.setPostComments(dto.getPostComments());
+        preferences.setCommentLikes(dto.getCommentLikes());
         preferences.setCommentReplies(dto.getCommentReplies());
         preferences.setAppointmentReminders(dto.getAppointmentReminders());
         preferences.setPrescriptionUpdates(dto.getPrescriptionUpdates());
@@ -94,6 +95,7 @@ public class NotificationPreferencesService {
         dto.setPushNotifications(preferences.getPushNotifications());
         dto.setPostLikes(preferences.getPostLikes());
         dto.setPostComments(preferences.getPostComments());
+        dto.setCommentLikes(preferences.getCommentLikes());
         dto.setCommentReplies(preferences.getCommentReplies());
         dto.setAppointmentReminders(preferences.getAppointmentReminders());
         dto.setPrescriptionUpdates(preferences.getPrescriptionUpdates());

@@ -176,6 +176,9 @@ public class MedicalPostCommentServiceImpl implements MedicalPostCommentService 
             throw new RuntimeException("You can only delete your own comments");
         }
         
+        // Remove notifications tied to this comment before deleting (to avoid foreign key constraint violation)
+        notificationRepository.deleteByComment(comment);
+        
         // Delete comment (cascade will handle related likes and replies)
         medicalPostCommentRepository.delete(comment);
         // Note: No need for explicit flush() - @Transactional handles commit automatically
@@ -375,7 +378,50 @@ public class MedicalPostCommentServiceImpl implements MedicalPostCommentService 
         
         Map<String, Object> userDetails = new HashMap<>();
         
-        // Try healthcare provider first
+        // First, try to find the user in the Users table to determine their role
+        Optional<Users> userOpt = userRepo.findById(userId);
+        if (userOpt.isPresent()) {
+            Users user = userOpt.get();
+            String role = user.getRole();
+            
+            // Based on role, look up in the appropriate table
+            if ("HEALTHCARE_PROVIDER".equalsIgnoreCase(role) || "DOCTOR".equalsIgnoreCase(role)) {
+                Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(userId);
+                if (providerOpt.isPresent()) {
+                    HealthcareProvider provider = providerOpt.get();
+                    userDetails.put("name", "Dr. " + provider.getFirstName() + " " + provider.getLastName());
+                    String specialty = provider.getSpecializations() != null && !provider.getSpecializations().isEmpty() 
+                        ? provider.getSpecializations().get(0).toString() 
+                        : "General Practice";
+                    userDetails.put("specialty", specialty);
+                    userDetails.put("userType", "doctor");
+                    // Include profile picture
+                    userDetails.put("profilePicture", provider.getProfilePicture());
+                    return userDetails;
+                }
+            } else if ("PATIENT".equalsIgnoreCase(role)) {
+                Optional<Patient> patientOpt = patientRepo.findById(userId);
+                if (patientOpt.isPresent()) {
+                    Patient patient = patientOpt.get();
+                    userDetails.put("name", patient.getFirstName() + " " + patient.getLastName());
+                    userDetails.put("specialty", "Patient");
+                    userDetails.put("userType", "patient");
+                    // Include profile picture
+                    userDetails.put("profilePicture", patient.getProfilePicture());
+                    return userDetails;
+                }
+            }
+            
+            // If role-based lookup failed, use basic user info as fallback
+            userDetails.put("name", user.getFirstName() + " " + user.getLastName());
+            userDetails.put("specialty", role != null ? role : "User");
+            userDetails.put("userType", role != null ? role.toLowerCase() : "unknown");
+            userDetails.put("profilePicture", null); // General users table doesn't have profile picture
+            log.debug("Using basic user info for user ID {} with role {}", userId, role);
+            return userDetails;
+        }
+        
+        // Fallback: try direct lookup in both tables (for backward compatibility)
         Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(userId);
         if (providerOpt.isPresent()) {
             HealthcareProvider provider = providerOpt.get();
@@ -385,23 +431,28 @@ public class MedicalPostCommentServiceImpl implements MedicalPostCommentService 
                 : "General Practice";
             userDetails.put("specialty", specialty);
             userDetails.put("userType", "doctor");
+            // Include profile picture
+            userDetails.put("profilePicture", provider.getProfilePicture());
             return userDetails;
         }
         
-        // Try patient
         Optional<Patient> patientOpt = patientRepo.findById(userId);
         if (patientOpt.isPresent()) {
             Patient patient = patientOpt.get();
             userDetails.put("name", patient.getFirstName() + " " + patient.getLastName());
             userDetails.put("specialty", "Patient");
             userDetails.put("userType", "patient");
+            // Include profile picture
+            userDetails.put("profilePicture", patient.getProfilePicture());
             return userDetails;
         }
         
-        // Fallback for unknown users
+        // Final fallback for unknown users
         userDetails.put("name", "Unknown User");
         userDetails.put("specialty", "User");
         userDetails.put("userType", "unknown");
+        userDetails.put("profilePicture", null);
+        log.warn("User with ID {} not found in Users, healthcare providers, or patients", userId);
         return userDetails;
     }
     
@@ -420,7 +471,55 @@ public class MedicalPostCommentServiceImpl implements MedicalPostCommentService 
         
         Map<String, Object> details = new HashMap<>();
         
-        // Try healthcare provider first
+        // First, try to find the user in the Users table to determine their role
+        Optional<Users> userOpt = userRepo.findById(userId);
+        if (userOpt.isPresent()) {
+            Users user = userOpt.get();
+            String role = user.getRole();
+            
+            // Based on role, look up in the appropriate table
+            if ("HEALTHCARE_PROVIDER".equalsIgnoreCase(role) || "DOCTOR".equalsIgnoreCase(role)) {
+                Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(userId);
+                if (providerOpt.isPresent()) {
+                    HealthcareProvider provider = providerOpt.get();
+                    details.put(prefix + "Name", "Dr. " + provider.getFirstName() + " " + provider.getLastName());
+                    String specialty = provider.getSpecializations() != null && !provider.getSpecializations().isEmpty() 
+                        ? provider.getSpecializations().get(0).toString() 
+                        : "General Practice";
+                    details.put(prefix + "Specialty", specialty);
+                    // Add profile picture from Users table
+                    details.put(prefix + "ProfilePicture", user.getProfilePicture());
+                    return details;
+                }
+            } else if ("PATIENT".equalsIgnoreCase(role)) {
+                Optional<Patient> patientOpt = patientRepo.findById(userId);
+                if (patientOpt.isPresent()) {
+                    Patient patient = patientOpt.get();
+                    details.put(prefix + "Name", patient.getFirstName() + " " + patient.getLastName());
+                    details.put(prefix + "Specialty", "Patient");
+                    // Add profile picture from Users table
+                    details.put(prefix + "ProfilePicture", user.getProfilePicture());
+                    return details;
+                }
+            }
+            
+            // If role-based lookup failed, use basic user info as fallback
+            // This handles cases like ADMIN or other roles that don't have specific tables
+            String fullName = user.getFirstName() + " " + user.getLastName();
+            details.put(prefix + "Name", fullName);
+            // For admin or other roles, set specialty based on role
+            if ("ADMIN".equalsIgnoreCase(role)) {
+                details.put(prefix + "Specialty", "ADMIN");
+            } else {
+                details.put(prefix + "Specialty", role != null ? role : "User");
+            }
+            // Add profile picture from Users table
+            details.put(prefix + "ProfilePicture", user.getProfilePicture());
+            log.debug("Using basic user info for user ID {} with role {}: {}", userId, role, fullName);
+            return details;
+        }
+        
+        // Fallback: try direct lookup in both tables (for backward compatibility)
         Optional<HealthcareProvider> providerOpt = healthcareProviderRepo.findById(userId);
         if (providerOpt.isPresent()) {
             HealthcareProvider provider = providerOpt.get();
@@ -429,22 +528,29 @@ public class MedicalPostCommentServiceImpl implements MedicalPostCommentService 
                 ? provider.getSpecializations().get(0).toString() 
                 : "General Practice";
             details.put(prefix + "Specialty", specialty);
+            // Try to get profile picture from Users table
+            if (userOpt.isPresent()) {
+                details.put(prefix + "ProfilePicture", userOpt.get().getProfilePicture());
+            }
             return details;
         }
         
-        // Try patient
         Optional<Patient> patientOpt = patientRepo.findById(userId);
         if (patientOpt.isPresent()) {
             Patient patient = patientOpt.get();
             details.put(prefix + "Name", patient.getFirstName() + " " + patient.getLastName());
             details.put(prefix + "Specialty", "Patient");
+            // Try to get profile picture from Users table
+            if (userOpt.isPresent()) {
+                details.put(prefix + "ProfilePicture", userOpt.get().getProfilePicture());
+            }
             return details;
         }
         
-        // Fallback for unknown users
+        // Final fallback for unknown users
         details.put(prefix + "Name", "Unknown User");
         details.put(prefix + "Specialty", "User");
-        log.warn("User with ID {} not found in healthcare providers or patients", userId);
+        log.warn("User with ID {} not found in Users, healthcare providers, or patients", userId);
         return details;
     }
     

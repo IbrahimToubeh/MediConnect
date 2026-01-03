@@ -96,7 +96,7 @@ public class NotificationService {
         Users commentOwner = userRepo.findById(comment.getCommenterId()).orElse(null);
         if (commentOwner == null || commentOwner.getId().equals(actor.getId())) return;
 
-        if (!notificationPreferencesService.isNotificationEnabled(commentOwner, "post_likes")) return;
+        if (!notificationPreferencesService.isNotificationEnabled(commentOwner, "comment_likes")) return;
 
         saveNotification(commentOwner, actor, NotificationType.COMMENT_LIKE,
                 actor.getFirstName() + " " + actor.getLastName() + " liked your comment",

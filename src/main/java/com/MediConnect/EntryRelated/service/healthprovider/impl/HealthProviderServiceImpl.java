@@ -12,6 +12,7 @@ import com.MediConnect.EntryRelated.repository.HealthcareProviderRepo;
 import com.MediConnect.EntryRelated.service.ActivityService;
 import com.MediConnect.EntryRelated.service.OTPService;
 import com.MediConnect.EntryRelated.service.healthprovider.HealthcareProviderService;
+import com.MediConnect.EntryRelated.service.review.ReviewService;
 import com.MediConnect.EntryRelated.service.healthprovider.mapper.HealthcareProviderMapper;
 import com.MediConnect.Service.UserService;
 import com.MediConnect.EntryRelated.exception.AccountStatusException;
@@ -39,6 +40,7 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
     private final JWTService jwtService;
     private final ActivityService activityService;
     private final NotificationService notificationService;
+    private final ReviewService reviewService;
     @Transactional
     public String register(SignupHPRequestDTO dto) {
         try {
@@ -46,6 +48,11 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
             System.out.println("Username: " + dto.getUsername());
             System.out.println("Email: " + dto.getEmail());
             System.out.println("Insurance Accepted: " + (dto.getInsuranceAccepted() != null ? dto.getInsuranceAccepted() : "null"));
+            System.out.println("Clinic Name: " + dto.getClinicName());
+            System.out.println("Address: " + dto.getAddress());
+            System.out.println("City: " + dto.getCity());
+            System.out.println("Country: " + dto.getCountry());
+            System.out.println("Consultation Fee: " + dto.getConsultationFee());
             
             // Normalize email
             String normalizedEmail = dto.getEmail().trim().toLowerCase();
@@ -63,6 +70,28 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
             System.out.println("Mapping DTO to Provider entity...");
             HealthcareProvider provider = providerMapper.signupDtoToProvider(dto);
             System.out.println("Mapping successful");
+            
+            // Explicitly set clinic information to ensure it's saved
+            if (dto.getClinicName() != null && !dto.getClinicName().trim().isEmpty()) {
+                provider.setClinicName(dto.getClinicName().trim());
+                System.out.println("DEBUG: Set clinicName to: " + provider.getClinicName());
+            }
+            if (dto.getAddress() != null && !dto.getAddress().trim().isEmpty()) {
+                provider.setAddress(dto.getAddress().trim());
+                System.out.println("DEBUG: Set address to: " + provider.getAddress());
+            }
+            if (dto.getCity() != null && !dto.getCity().trim().isEmpty()) {
+                provider.setCity(dto.getCity().trim());
+                System.out.println("DEBUG: Set city to: " + provider.getCity());
+            }
+            if (dto.getCountry() != null && !dto.getCountry().trim().isEmpty()) {
+                provider.setCountry(dto.getCountry().trim());
+                System.out.println("DEBUG: Set country to: " + provider.getCountry());
+            }
+            if (dto.getConsultationFee() != null) {
+                provider.setConsultationFee(dto.getConsultationFee());
+                System.out.println("DEBUG: Set consultationFee to: " + provider.getConsultationFee());
+            }
             
             provider.setRole("HEALTHPROVIDER");
             provider.setEmail(normalizedEmail);
@@ -132,7 +161,23 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
         }
 
         System.out.println("Saving provider to database...");
+        System.out.println("DEBUG: Before save - Clinic Name: " + provider.getClinicName());
+        System.out.println("DEBUG: Before save - Address: " + provider.getAddress());
+        System.out.println("DEBUG: Before save - City: " + provider.getCity());
+        System.out.println("DEBUG: Before save - Country: " + provider.getCountry());
+        System.out.println("DEBUG: Before save - Consultation Fee: " + provider.getConsultationFee());
+        
         providerRepo.save(provider);
+        
+        // Verify after save
+        HealthcareProvider savedProvider = providerRepo.findById(provider.getId()).orElse(null);
+        if (savedProvider != null) {
+            System.out.println("DEBUG: After save - Clinic Name: " + savedProvider.getClinicName());
+            System.out.println("DEBUG: After save - Address: " + savedProvider.getAddress());
+            System.out.println("DEBUG: After save - City: " + savedProvider.getCity());
+            System.out.println("DEBUG: After save - Country: " + savedProvider.getCountry());
+            System.out.println("DEBUG: After save - Consultation Fee: " + savedProvider.getConsultationFee());
+        }
 
         String fullName = formatName(provider.getFirstName(), provider.getLastName());
         String approvalMessage = "New doctor registration pending approval: Dr. " + fullName;
@@ -342,11 +387,21 @@ public class HealthProviderServiceImpl implements HealthcareProviderService {
                     }
                 }
                 
-                // Filter by rating (mock rating for now - will be real rating later)
+                // Filter by rating (using real ratings from ReviewService)
                 if (minRating != null && minRating > 0) {
-                    // Generate a mock rating based on provider ID for consistency
-                    double mockRating = 3.5 + (provider.getId() % 15) * 0.1; // Ratings between 3.5-5.0
-                    if (mockRating < minRating) {
+                    try {
+                        Map<String, Object> ratingData = reviewService.getDoctorRating(provider.getId());
+                        double actualRating = 0.0;
+                        if ("success".equals(ratingData.get("status"))) {
+                            Object avgRating = ratingData.get("averageRating");
+                            actualRating = (avgRating != null) ? ((Number) avgRating).doubleValue() : 0.0;
+                        }
+                        if (actualRating < minRating) {
+                            return false;
+                        }
+                    } catch (Exception e) {
+                        // If error fetching rating, exclude from results when minRating filter is applied
+                        // (safer to exclude than include with unknown rating)
                         return false;
                     }
                 }

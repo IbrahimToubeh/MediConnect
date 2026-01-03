@@ -4,6 +4,7 @@ import com.MediConnect.Entities.AppointmentEntity;
 import com.MediConnect.Entities.AppointmentStatus;
 import com.MediConnect.EntryRelated.repository.AppointmentRepository;
 import com.MediConnect.EntryRelated.repository.HealthcareProviderRepo;
+import com.MediConnect.EntryRelated.repository.ProfileViewRepository;
 import com.MediConnect.EntryRelated.service.analytics.AnalyticsService;
 import com.MediConnect.socialmedia.entity.MedicalPost;
 import com.MediConnect.socialmedia.entity.MedicalPostComment;
@@ -23,7 +24,7 @@ import java.util.stream.Collectors;
  * Implementation of AnalyticsService
  * 
  * Calculates analytics data for doctors including:
- * - Profile views (mock data for now - can be enhanced with actual tracking)
+ * - Profile views (real data from ProfileView tracking)
  * - Post interactions (total likes, comments, engagement rate)
  * - Appointment statistics (total, pending, confirmed, completed, cancelled)
  * - Patient growth (new patients over time)
@@ -38,6 +39,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     private final MedicalPostCommentRepository medicalPostCommentRepository;
     private final AppointmentRepository appointmentRepository;
     private final HealthcareProviderRepo healthcareProviderRepo;
+    private final ProfileViewRepository profileViewRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -49,19 +51,38 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             throw new RuntimeException("Doctor not found");
         }
         
-        // 1. PROFILE VIEWS (mock data - can be enhanced with actual tracking)
-        // TODO: Implement actual profile view tracking
-        int profileViews = (int)(Math.random() * 500) + 100; // Mock: 100-600 views
-        int profileViewsThisMonth = (int)(Math.random() * 100) + 20; // Mock: 20-120 this month
-        int profileViewsLastMonth = (int)(Math.random() * 80) + 15; // Mock: 15-95 last month
+        // 1. PROFILE VIEWS - Real data from ProfileView tracking
+        // Get total profile views for this doctor
+        long totalProfileViews = profileViewRepository.countByDoctorId(doctorId);
         
+        // Calculate date ranges for this month and last month
+        LocalDate now = LocalDate.now();
+        LocalDate firstDayOfThisMonth = now.withDayOfMonth(1);
+        LocalDate lastDayOfThisMonth = now.withDayOfMonth(now.lengthOfMonth());
+        LocalDate firstDayOfLastMonth = firstDayOfThisMonth.minusMonths(1);
+        LocalDate lastDayOfLastMonth = firstDayOfThisMonth.minusDays(1);
+        
+        // Convert LocalDate to Date for query
+        Date startOfThisMonth = Date.from(firstDayOfThisMonth.atStartOfDay(ZoneId.systemDefault()).toInstant());
+        Date endOfThisMonth = Date.from(lastDayOfThisMonth.atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toInstant());
+        Date startOfLastMonth = Date.from(firstDayOfLastMonth.atStartOfDay(ZoneId.systemDefault()).toInstant());
+        Date endOfLastMonth = Date.from(lastDayOfLastMonth.atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toInstant());
+        
+        // Count views for this month and last month
+        long profileViewsThisMonth = profileViewRepository.countByDoctorIdAndDateRange(
+            doctorId, startOfThisMonth, endOfThisMonth);
+        long profileViewsLastMonth = profileViewRepository.countByDoctorIdAndDateRange(
+            doctorId, startOfLastMonth, endOfLastMonth);
+        
+        // Calculate percentage change
         double profileViewsChange = profileViewsLastMonth > 0 
             ? ((double)(profileViewsThisMonth - profileViewsLastMonth) / profileViewsLastMonth) * 100 
-            : 0;
+            : (profileViewsThisMonth > 0 ? 100.0 : 0.0); // If last month was 0 but this month has views, show 100% increase
         
-        analytics.put("profileViews", profileViews);
-        analytics.put("profileViewsThisMonth", profileViewsThisMonth);
-        analytics.put("profileViewsLastMonth", profileViewsLastMonth);
+        // Add profile view statistics to analytics
+        analytics.put("profileViews", (int)totalProfileViews);
+        analytics.put("profileViewsThisMonth", (int)profileViewsThisMonth);
+        analytics.put("profileViewsLastMonth", (int)profileViewsLastMonth);
         analytics.put("profileViewsChange", Math.round(profileViewsChange * 10.0) / 10.0);
         
         // 2. POST STATISTICS
@@ -147,7 +168,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         int totalPatients = uniquePatients.size();
         
         // Calculate new patients this month
-        LocalDate now = LocalDate.now();
+        // Reuse the 'now' variable from profile views calculation above
         LocalDate firstDayOfMonth = now.withDayOfMonth(1);
         
         long newPatientsThisMonth = allAppointments.stream()
@@ -170,8 +191,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         
         // 6. CALCULATE KEY METRICS
         // Conversion rate: appointments / profile views (if applicable)
-        double conversionRate = profileViews > 0 
-            ? ((double)totalAppointments / profileViews) * 100 
+        double conversionRate = totalProfileViews > 0 
+            ? ((double)totalAppointments / totalProfileViews) * 100 
             : 0;
         
         // Completion rate

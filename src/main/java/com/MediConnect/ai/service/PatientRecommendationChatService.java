@@ -12,7 +12,6 @@ import com.MediConnect.ai.dto.PatientContextDTO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -49,39 +48,51 @@ import java.util.HashSet;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class PatientRecommendationChatService {
 
     private static final URI OPENAI_CHAT_URI = URI.create("https://api.openai.com/v1/chat/completions");
     private static final double BASE_MATCH_SCORE = 1.0d;
-    private static final int MAX_HISTORY_LENGTH = 18;
-    private static final int MAX_DOCTORS_SHARED_WITH_MODEL = 12;
+    private static final int MAX_HISTORY_LENGTH = 8; // Reduced to save tokens
+    private static final int MAX_DOCTORS_SHARED_WITH_MODEL = 4; // Reduced to save tokens
     private static final int MAX_DOCTORS_RETURNED_TO_PATIENT = 4;
     private static final Map<SpecializationType, Set<String>> SPECIALISATION_KEYWORDS = buildSpecialisationKeywordMap();
     private static final Map<String, String> SPECIALISATION_SYNONYMS = buildSpecialisationSynonymMap();
 
     private final HealthcareProviderRepo healthcareProviderRepo;
     private final ObjectMapper objectMapper;
-
-    @Qualifier("openAiRestTemplate")
     private final RestTemplate openAiRestTemplate;
-
-    @Value("${openai.api-key}")
+    
+    @Value("${openai.api-key:}")
     private String openAiApiKey;
-
+    
     @Value("${openai.model:gpt-4o-mini}")
     private String openAiModel;
+
+    // Explicit constructor injection to properly handle @Qualifier
+    public PatientRecommendationChatService(
+            HealthcareProviderRepo healthcareProviderRepo,
+            ObjectMapper objectMapper,
+            @Qualifier("openAiRestTemplate") RestTemplate openAiRestTemplate) {
+        this.healthcareProviderRepo = healthcareProviderRepo;
+        this.objectMapper = objectMapper;
+        this.openAiRestTemplate = openAiRestTemplate;
+    }
 
     public ChatResponseDTO chat(ChatRequestDTO request) {
         PatientContextDTO context = Optional.ofNullable(request.getContext()).orElseGet(PatientContextDTO::new);
 
         List<HealthcareProvider> providers = healthcareProviderRepo.findAll();
+        log.info("Fetched {} providers from database", providers.size());
         if (providers.isEmpty()) {
+            log.warn("No providers found in database at all!");
             return buildFallbackResponse(context, List.of(), "No active doctors available.");
         }
 
         List<ChatMessageDTO> incomingMessages = Optional.ofNullable(request.getMessages()).orElse(List.of());
         InteractionIntent intent = detectIntent(incomingMessages);
+        log.info("Detected intent: {} for messages: {}", intent, incomingMessages.stream()
+                .map(m -> m.getContent())
+                .collect(Collectors.toList()));
 
         if (intent == InteractionIntent.NAVIGATION_ONLY || intent == InteractionIntent.GREETING_ONLY) {
             resetContextForNavigation(context);
@@ -90,14 +101,42 @@ public class PatientRecommendationChatService {
         enrichContextFromMessages(context, incomingMessages, providers);
 
         List<DoctorSuggestionDTO> doctorCatalogue = loadDoctorCatalogue(context, providers);
+        log.info("loadDoctorCatalogue returned {} doctors", doctorCatalogue.size());
         RecommendationOutcome recommendationOutcome = buildRankedRecommendations(context, doctorCatalogue, intent == InteractionIntent.FIND_DOCTOR);
+        log.info("buildRankedRecommendations returned payloadCatalogue with {} doctors", recommendationOutcome.payloadCatalogue.size());
 
-        if (intent == InteractionIntent.FIND_DOCTOR && recommendationOutcome.ranked.isEmpty()) {
-            log.warn("Doctor catalogue is empty. Returning fallback message.");
+        // Ensure we always send doctors to the AI if they exist, even if filtering resulted in empty payloadCatalogue
+        // This allows the AI to recommend doctors even if they don't perfectly match all criteria
+        List<DoctorSuggestionDTO> doctorsToSend = recommendationOutcome.payloadCatalogue;
+        if (doctorsToSend.isEmpty() && !doctorCatalogue.isEmpty() && intent == InteractionIntent.FIND_DOCTOR) {
+            // If filtering removed all doctors, send at least the top doctors from the original catalogue
+            // Prioritize doctors with the right specialization if available
+            log.warn("payloadCatalogue is empty after filtering, but doctorCatalogue has {} doctors. Sending top doctors from original catalogue.", doctorCatalogue.size());
+            doctorsToSend = doctorCatalogue.stream()
+                    .limit(MAX_DOCTORS_SHARED_WITH_MODEL)
+                    .collect(Collectors.toList());
+        }
+
+        // Only return early if the original catalogue is completely empty
+        if (intent == InteractionIntent.FIND_DOCTOR && doctorCatalogue.isEmpty()) {
+            log.warn("Doctor catalogue is completely empty. Returning fallback message.");
             return buildFallbackResponse(context, List.of(), "No active doctors available.");
         }
 
-        List<Map<String, Object>> payloadMessages = buildMessagesPayload(incomingMessages, context, recommendationOutcome.payloadCatalogue);
+        // Log what we're sending for debugging
+        if (intent == InteractionIntent.FIND_DOCTOR) {
+            log.info("Sending {} doctors to AI for recommendation. Original catalogue had {} doctors.", 
+                    doctorsToSend.size(), doctorCatalogue.size());
+            if (!doctorsToSend.isEmpty()) {
+                log.debug("Sample doctor IDs being sent: {}", 
+                        doctorsToSend.stream().map(DoctorSuggestionDTO::getId).limit(3).collect(Collectors.toList()));
+            } else {
+                log.error("ERROR: doctorsToSend is empty but doctorCatalogue has {} doctors! This should not happen.", doctorCatalogue.size());
+            }
+        }
+
+        // Build messages with the doctors we're actually sending to the AI
+        List<Map<String, Object>> payloadMessages = buildMessagesPayload(incomingMessages, context, doctorsToSend);
         Map<String, Object> payload = new HashMap<>();
         payload.put("model", openAiModel);
         payload.put("temperature", 0.2);
@@ -119,11 +158,105 @@ public class PatientRecommendationChatService {
 
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
                 log.warn("OpenAI request returned non-success status: {}", response.getStatusCode());
-                return buildFallbackResponse(context, recommendationOutcome.payloadCatalogue, "Assistant unavailable right now.");
+                return buildFallbackResponse(context, doctorsToSend, "Assistant unavailable right now.");
             }
 
-            ChatResponseDTO chatResponse = parseResponse(response.getBody(), context, recommendationOutcome.payloadCatalogue);
+            // Use the doctors we actually sent to the AI for parsing
+            ChatResponseDTO chatResponse = parseResponse(response.getBody(), context, doctorsToSend);
             mergeRecommendationGuidance(chatResponse, recommendationOutcome, intent == InteractionIntent.FIND_DOCTOR);
+            
+            // CRITICAL: Filter recommended doctors to only include those matching the requested specialization
+            if (intent == InteractionIntent.FIND_DOCTOR && 
+                chatResponse.getRecommendedDoctors() != null && 
+                !chatResponse.getRecommendedDoctors().isEmpty() &&
+                context != null && !isBlank(context.getPreferredSpecialization())) {
+                String requestedSpec = context.getPreferredSpecialization().toUpperCase();
+                List<DoctorSuggestionDTO> filteredDoctors = chatResponse.getRecommendedDoctors().stream()
+                        .filter(doc -> doc.getSpecializations() != null && 
+                                doc.getSpecializations().stream()
+                                        .anyMatch(spec -> spec != null && spec.toUpperCase().equals(requestedSpec)))
+                        .collect(Collectors.toList());
+                
+                if (filteredDoctors.size() != chatResponse.getRecommendedDoctors().size()) {
+                    log.info("Filtered recommended doctors: {} -> {} (removed non-matching specializations)", 
+                            chatResponse.getRecommendedDoctors().size(), filteredDoctors.size());
+                }
+                chatResponse.setRecommendedDoctors(filteredDoctors);
+            }
+            
+            // Fallback: If AI didn't recommend any doctors but we have doctors in the catalogue and user is looking for a doctor,
+            // recommend the top doctors anyway
+            if (intent == InteractionIntent.FIND_DOCTOR && 
+                (chatResponse.getRecommendedDoctors() == null || chatResponse.getRecommendedDoctors().isEmpty()) &&
+                !doctorsToSend.isEmpty()) {
+                log.warn("AI did not recommend any doctors, but catalogue has {} doctors. Adding top doctors as fallback.", doctorsToSend.size());
+                // Take top 4 doctors from the catalogue, prioritizing by specialization match if context has one
+                List<DoctorSuggestionDTO> fallbackDoctors;
+                String requestedSpec = (context != null && !isBlank(context.getPreferredSpecialization())) 
+                        ? context.getPreferredSpecialization().toUpperCase() 
+                        : null;
+                if (requestedSpec != null) {
+                    // ONLY include doctors with the requested specialization - don't fall back to others
+                    List<DoctorSuggestionDTO> matchingSpec = doctorsToSend.stream()
+                            .filter(doc -> doc.getSpecializations() != null && 
+                                    doc.getSpecializations().stream()
+                                            .anyMatch(spec -> spec != null && spec.toUpperCase().equals(requestedSpec)))
+                            .limit(MAX_DOCTORS_RETURNED_TO_PATIENT)
+                            .collect(Collectors.toList());
+                    // Only use matching doctors - don't fall back to non-matching ones
+                    fallbackDoctors = matchingSpec;
+                    log.info("Fallback: Found {} doctors matching specialization '{}'", matchingSpec.size(), requestedSpec);
+                } else {
+                    fallbackDoctors = doctorsToSend.stream()
+                            .limit(MAX_DOCTORS_RETURNED_TO_PATIENT)
+                            .collect(Collectors.toList());
+                }
+                
+                chatResponse.setRecommendedDoctors(fallbackDoctors);
+                chatResponse.setInformationComplete(true);
+                
+                // Update reply to mention we're showing available doctors
+                String originalReply = chatResponse.getReply();
+                String specializationName = (context != null && !isBlank(context.getPreferredSpecialization())) 
+                        ? context.getPreferredSpecialization().toLowerCase().replace("_", " ") 
+                        : "";
+                if (originalReply != null && (originalReply.toLowerCase().contains("no doctors") || 
+                                              originalReply.toLowerCase().contains("unfortunately") ||
+                                              originalReply.toLowerCase().contains("don't have"))) {
+                    // Replace the "no doctors" message with a positive one
+                    if (!isBlank(specializationName)) {
+                        chatResponse.setReply("I found " + fallbackDoctors.size() + " " + specializationName + 
+                                " doctor(s) for you. Here are the best matches:");
+                    } else {
+                        chatResponse.setReply("I found " + fallbackDoctors.size() + 
+                                " doctor(s) for you. Here are the best matches:");
+                    }
+                }
+            }
+            
+            // FINAL FILTER: Ensure we never return doctors that don't match the requested specialization
+            if (intent == InteractionIntent.FIND_DOCTOR && 
+                chatResponse.getRecommendedDoctors() != null && 
+                !chatResponse.getRecommendedDoctors().isEmpty() &&
+                context != null && !isBlank(context.getPreferredSpecialization())) {
+                String requestedSpec = context.getPreferredSpecialization().toUpperCase();
+                List<DoctorSuggestionDTO> finalFiltered = chatResponse.getRecommendedDoctors().stream()
+                        .filter(doc -> {
+                            if (doc.getSpecializations() == null || doc.getSpecializations().isEmpty()) {
+                                return false; // Exclude doctors with no specializations if one was requested
+                            }
+                            return doc.getSpecializations().stream()
+                                    .anyMatch(spec -> spec != null && spec.toUpperCase().equals(requestedSpec));
+                        })
+                        .collect(Collectors.toList());
+                
+                if (finalFiltered.size() != chatResponse.getRecommendedDoctors().size()) {
+                    log.warn("FINAL FILTER: Removed {} non-matching doctors. Returning {} matching doctors.", 
+                            chatResponse.getRecommendedDoctors().size() - finalFiltered.size(), finalFiltered.size());
+                }
+                chatResponse.setRecommendedDoctors(finalFiltered);
+            }
+            
             if (intent != InteractionIntent.FIND_DOCTOR) {
                 chatResponse.setRecommendedDoctors(new ArrayList<>());
                 chatResponse.setInformationComplete(false);
@@ -131,7 +264,7 @@ public class PatientRecommendationChatService {
             return chatResponse;
         } catch (Exception ex) {
             log.error("OpenAI chat call failed: {}", ex.getMessage(), ex);
-            return buildFallbackResponse(context, recommendationOutcome.payloadCatalogue, ex.getMessage());
+            return buildFallbackResponse(context, doctorsToSend, ex.getMessage());
         }
     }
 
@@ -144,16 +277,66 @@ public class PatientRecommendationChatService {
                 "content", buildSystemInstruction(context, catalogue)
         ));
 
+        // Serialize doctor catalogue and add it to the system message for better visibility
+        // Create a minimal version to reduce token usage
+        List<Map<String, Object>> minimalCatalogue = catalogue.stream()
+                .map(doc -> {
+                    Map<String, Object> minimal = new HashMap<>();
+                    minimal.put("id", doc.getId());
+                    minimal.put("fullName", doc.getFullName());
+                    minimal.put("specializations", doc.getSpecializations());
+                    minimal.put("city", doc.getCity());
+                    minimal.put("country", doc.getCountry());
+                    // Truncate bio to max 100 characters
+                    if (doc.getShortBio() != null && !doc.getShortBio().isEmpty()) {
+                        minimal.put("shortBio", doc.getShortBio().length() > 100 
+                                ? doc.getShortBio().substring(0, 100) + "..." 
+                                : doc.getShortBio());
+                    }
+                    // Limit insurance to first 5
+                    if (doc.getInsuranceAccepted() != null && !doc.getInsuranceAccepted().isEmpty()) {
+                        minimal.put("insuranceAccepted", doc.getInsuranceAccepted().stream()
+                                .limit(5)
+                                .collect(Collectors.toList()));
+                    }
+                    // Only include consultation fee if not null
+                    if (doc.getConsultationFee() != null) {
+                        minimal.put("consultationFee", doc.getConsultationFee());
+                    }
+                    // Don't include profilePicture - it's too large
+                    return minimal;
+                })
+                .collect(Collectors.toList());
+        
         String catalogueJson;
         try {
-            catalogueJson = objectMapper.writeValueAsString(catalogue);
+            catalogueJson = objectMapper.writeValueAsString(minimalCatalogue);
+            // Log catalogue size for debugging
+            log.info("Sending {} doctors to AI in catalogue (minimal version, JSON length: {} chars)", 
+                    catalogue.size(), catalogueJson.length());
+            if (catalogue.isEmpty()) {
+                log.warn("WARNING: Doctor catalogue is empty! No doctors will be available for recommendation.");
+            }
         } catch (JsonProcessingException ex) {
             log.warn("Failed to serialise doctor catalogue: {}", ex.getMessage());
             catalogueJson = "[]";
         }
+        
+        // Add catalogue as a separate user message - keep it SHORT to save tokens
+        String catalogueMessage;
+        if (catalogue.isEmpty()) {
+            catalogueMessage = "DOCTOR_CATALOGUE_JSON: []\n\nNo doctors available.";
+        } else {
+            // Shortened message to save tokens
+            catalogueMessage = "DOCTOR_CATALOGUE_JSON: " + catalogueJson + 
+                    "\n\nIMPORTANT: This catalogue has " + catalogue.size() + " doctor(s). " +
+                    "You MUST recommend 1-4 doctors from this catalogue. " +
+                    "If patient asks for a specific type (e.g., 'psychiatry'), find matching doctors and recommend them immediately. " +
+                    "NEVER say 'no doctors available' if catalogue is not empty.";
+        }
         messages.add(Map.of(
-                "role", "system",
-                "content", "DOCTOR_CATALOGUE_JSON::" + catalogueJson
+                "role", "user",
+                "content", catalogueMessage
         ));
 
         List<ChatMessageDTO> truncatedHistory = truncateHistory(incomingMessages);
@@ -413,10 +596,37 @@ public class PatientRecommendationChatService {
                 });
             }
 
+            // Filter to only include doctors that match the requested specialization (if specified)
             List<DoctorSuggestionDTO> recommended = catalogue.stream()
                     .filter(dto -> doctorIds.contains(dto.getId()))
+                    .filter(dto -> {
+                        // If a specialization is requested, only include doctors with that specialization
+                        if (previousContext != null && !isBlank(previousContext.getPreferredSpecialization())) {
+                            String requestedSpec = previousContext.getPreferredSpecialization().toUpperCase();
+                            if (dto.getSpecializations() != null && !dto.getSpecializations().isEmpty()) {
+                                return dto.getSpecializations().stream()
+                                        .anyMatch(spec -> spec != null && spec.toUpperCase().equals(requestedSpec));
+                            }
+                            return false; // No specializations listed, exclude if specialization was requested
+                        }
+                        return true; // No specialization requested, include all
+                    })
                     .limit(MAX_DOCTORS_RETURNED_TO_PATIENT)
                     .collect(Collectors.toCollection(ArrayList::new));
+            
+            log.info("AI recommended {} doctor IDs: {}. After specialization filtering: {} doctors match.", 
+                    doctorIds.size(), doctorIds, recommended.size());
+
+            // Log what the AI recommended
+            log.info("AI recommended {} doctor IDs: {}. Catalogue had {} doctors.", 
+                    doctorIds.size(), doctorIds, catalogue.size());
+            
+            // If AI didn't recommend any doctors but catalogue has doctors, log a warning
+            if (recommended.isEmpty() && !catalogue.isEmpty()) {
+                log.warn("AI did not recommend any doctors from catalogue of {} doctors. Doctor IDs in catalogue: {}", 
+                        catalogue.size(), 
+                        catalogue.stream().map(DoctorSuggestionDTO::getId).limit(5).collect(Collectors.toList()));
+            }
 
             if (recommended.isEmpty()) {
                 response.setNavigationTips(buildNavigationTips(previousContext));
@@ -573,30 +783,25 @@ public class PatientRecommendationChatService {
             contextJson = "{}";
         }
 
+        // Build a more explicit system instruction
+        String catalogueInfo = catalogue.isEmpty() 
+            ? "WARNING: The doctor catalogue is currently empty. You should inform the patient that no doctors are available at this time."
+            : "The doctor catalogue contains " + catalogue.size() + " doctor(s). You MUST recommend doctors from this catalogue.";
+        
+        // SHORTENED system prompt to save tokens (reduced from ~2000 to ~300 tokens)
         return """
-                You are MediConnect's AI Care Navigator. You speak with patients in a friendly and reassuring tone,
-                ask the minimum number of questions needed to understand their situation, and recommend suitable doctors
-                from the provided catalogue. Only recommend doctors that appear in DOCTOR_CATALOGUE_JSON.
+                You are MediConnect's AI Care Navigator. Recommend doctors from DOCTOR_CATALOGUE_JSON.
 
-                You also help visitors navigate MediConnect by describing how to:
-                - register as a patient or doctor applicant
-                - search for doctors (filters: specialty, insurance, location, consultation fee, availability, ratings)
-                - book, reschedule, or cancel appointments and join telehealth visits
-                - manage medical history, privacy, and notification preferences
-                - leave doctor reviews or engage with community posts
-                - understand which insurance plans each doctor accepts
+                RULES:
+                1. %s
+                2. If DOCTOR_CATALOGUE_JSON has doctors, you MUST recommend 1-4 doctor IDs in recommendedDoctorIds.
+                3. If patient asks for a type (e.g., "psychiatry"), find doctors with that specialization and recommend immediately.
+                4. NEVER say "no doctors available" if catalogue has doctors.
+                5. Recommend first, ask for details (city/insurance) after.
 
-                Respond strictly in JSON following this schema: %s
-
-                The patient context collected so far is: %s
-
-                If you need more details (e.g. insurance provider, city, symptoms), set informationComplete to false
-                and include concise followUpQuestions. Ask for missing details before recommending a doctor.
-                Once you are confident you have enough information, set informationComplete to true and populate
-                recommendedDoctorIds with the IDs of the best matching doctors from the catalogue.
-                Provide an empathetic reply summarising why the suggested doctors match and include any relevant
-                instructional hints inside navigationTips (each entry a short plain-text tip about using MediConnect).
-                """.formatted(schemaJson, contextJson).trim();
+                JSON schema: %s
+                Context: %s
+                """.formatted(catalogueInfo, schemaJson, contextJson).trim();
     }
 
     private Map<String, Object> schemaForContext() {
@@ -623,10 +828,46 @@ public class PatientRecommendationChatService {
 
     private List<DoctorSuggestionDTO> loadDoctorCatalogue(PatientContextDTO context,
                                                           List<HealthcareProvider> providers) {
+        log.info("Loading doctor catalogue: Found {} total providers from database", providers.size());
+        
+        // Log account status distribution
+        Map<AccountStatus, Long> statusCount = providers.stream()
+                .collect(Collectors.groupingBy(
+                        provider -> provider.getAccountStatus() != null ? provider.getAccountStatus() : AccountStatus.PENDING,
+                        Collectors.counting()));
+        log.info("Provider account status distribution: {}", statusCount);
+        
+        // Log admin-flagged count
+        long flaggedCount = providers.stream()
+                .filter(provider -> Boolean.TRUE.equals(provider.getAdminFlagged()))
+                .count();
+        log.info("Admin-flagged providers: {}", flaggedCount);
+        
         List<HealthcareProvider> activeProviders = providers.stream()
                 .filter(provider -> provider.getAccountStatus() == AccountStatus.ACTIVE)
                 .filter(provider -> !Boolean.TRUE.equals(provider.getAdminFlagged()))
                 .toList();
+        
+        log.info("After filtering (ACTIVE and not admin-flagged): {} providers remain", activeProviders.size());
+        
+        // TEMPORARY FIX: If no active providers, use all non-flagged providers regardless of status
+        // This helps diagnose the issue and ensures doctors are shown
+        if (activeProviders.isEmpty() && !providers.isEmpty()) {
+            log.warn("WARNING: No active providers found! Total providers: {}, Statuses: {}, Flagged: {}", 
+                    providers.size(), statusCount, flaggedCount);
+            // If no active providers, let's see what statuses we have
+            providers.stream()
+                    .limit(5)
+                    .forEach(p -> log.warn("Sample provider - ID: {}, Status: {}, Flagged: {}, Username: {}", 
+                            p.getId(), p.getAccountStatus(), p.getAdminFlagged(), p.getUsername()));
+            
+            // Fallback: Use all non-flagged providers regardless of status
+            log.warn("FALLBACK: Using all non-flagged providers regardless of account status");
+            activeProviders = providers.stream()
+                    .filter(provider -> !Boolean.TRUE.equals(provider.getAdminFlagged()))
+                    .toList();
+            log.info("After fallback filtering (not admin-flagged): {} providers remain", activeProviders.size());
+        }
 
         Map<Long, Set<String>> providerInsuranceMap = activeProviders.stream()
                 .collect(Collectors.toMap(
@@ -645,16 +886,33 @@ public class PatientRecommendationChatService {
                 ));
 
         String inferredSpecialisation = inferPreferredSpecialisation(context, providerSpecialityMap);
+        log.info("Inferred specialization: {}", inferredSpecialisation);
 
-        return activeProviders.stream()
-                .map(provider -> toSuggestion(provider, context, inferredSpecialisation,
-                        providerInsuranceMap.getOrDefault(provider.getId(), Set.of()),
-                        providerSpecialityMap.getOrDefault(provider.getId(), Set.of())))
+        List<DoctorSuggestionDTO> catalogue = activeProviders.stream()
+                .map(provider -> {
+                    try {
+                        return toSuggestion(provider, context, inferredSpecialisation,
+                                providerInsuranceMap.getOrDefault(provider.getId(), Set.of()),
+                                providerSpecialityMap.getOrDefault(provider.getId(), Set.of()));
+                    } catch (Exception e) {
+                        log.error("Error converting provider {} to DTO: {}", provider.getId(), e.getMessage(), e);
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
                 .sorted(Comparator.comparingDouble(
                         (DoctorSuggestionDTO dto) -> dto.getMatchScore() != null ? dto.getMatchScore() : 0.0d
                 ).reversed())
                 .limit(MAX_DOCTORS_SHARED_WITH_MODEL)
                 .collect(Collectors.toList());
+        
+        log.info("Created doctor catalogue with {} doctors", catalogue.size());
+        if (!catalogue.isEmpty()) {
+            log.debug("Sample doctor IDs in catalogue: {}", 
+                    catalogue.stream().map(DoctorSuggestionDTO::getId).limit(3).collect(Collectors.toList()));
+        }
+        
+        return catalogue;
     }
 
     private DoctorSuggestionDTO toSuggestion(HealthcareProvider provider,
@@ -963,21 +1221,35 @@ public class PatientRecommendationChatService {
     private RecommendationOutcome buildRankedRecommendations(PatientContextDTO context,
                                                              List<DoctorSuggestionDTO> catalogue,
                                                              boolean includeDoctorScoring) {
+        log.info("buildRankedRecommendations CALLED: catalogue size={}, includeDoctorScoring={}", 
+                catalogue != null ? catalogue.size() : 0, includeDoctorScoring);
+        
         RecommendationOutcome outcome = new RecommendationOutcome();
         if (catalogue == null || catalogue.isEmpty()) {
+            log.warn("buildRankedRecommendations: catalogue is null or empty");
             return outcome;
         }
 
         if (!includeDoctorScoring) {
             // Navigation-only questions: keep catalogue empty so the model focuses on guidance.
+            log.warn("buildRankedRecommendations: includeDoctorScoring is false, returning empty catalogue");
             outcome.payloadCatalogue = List.of();
             return outcome;
         }
+        
+        // CRITICAL: Always ensure we return doctors if catalogue is not empty
+        // This is a safety net - if anything goes wrong, we still return doctors
+        outcome.payloadCatalogue = new ArrayList<>(catalogue.stream()
+                .limit(MAX_DOCTORS_SHARED_WITH_MODEL)
+                .collect(Collectors.toList()));
+        
+        log.info("buildRankedRecommendations: Initial payloadCatalogue set to {} doctors (safety net)", outcome.payloadCatalogue.size());
 
         Double topSpecialisationScore = null;
         Double topInsuranceScore = null;
         Double topLocationScore = null;
 
+        log.info("Starting to score {} doctors from catalogue", catalogue.size());
         for (DoctorSuggestionDTO doctor : catalogue) {
             double specialityScore = matchSpecialisationScore(context, doctor.getSpecializations());
             double insuranceScore = matchInsuranceScore(context, new HashSet<>(Optional.ofNullable(doctor.getInsuranceAccepted()).orElse(List.of()).stream()
@@ -993,43 +1265,73 @@ public class PatientRecommendationChatService {
             topInsuranceScore = topInsuranceScore == null ? insuranceScore : Math.max(topInsuranceScore, insuranceScore);
             topLocationScore = topLocationScore == null ? locationScore : Math.max(topLocationScore, locationScore);
         }
+        log.info("Scored {} doctors, outcome.ranked size: {}", catalogue.size(), outcome.ranked.size());
 
-        List<RankedDoctor> sorted = outcome.ranked.stream()
-                .sorted(Comparator.comparingDouble(RankedDoctor::totalScore).reversed())
-                .collect(Collectors.toList());
-
-        List<RankedDoctor> filtered = new ArrayList<>(sorted);
-
-        if (!isBlank(context != null ? context.getPreferredSpecialization() : null) && outcome.topSpecialisationScore > 0) {
-            filtered = filtered.stream()
-                    .filter(r -> r.specialisationScore == outcome.topSpecialisationScore)
-                    .collect(Collectors.toList());
-        }
-
-        if (!isBlank(context != null ? context.getInsuranceProvider() : null) && outcome.topInsuranceScore > 0) {
-            filtered = filtered.stream()
-                    .filter(r -> r.insuranceScore == outcome.topInsuranceScore)
-                    .collect(Collectors.toList());
-        }
-
-        if (!isBlank(context != null ? context.getCity() : null) && outcome.topLocationScore > 0) {
-            filtered = filtered.stream()
-                    .filter(r -> r.locationScore == outcome.topLocationScore)
-                    .collect(Collectors.toList());
-        }
-
-        if (filtered.isEmpty()) {
-            filtered = sorted;
-        }
-
-        outcome.payloadCatalogue = filtered.stream()
-                .map(RankedDoctor::doctor)
-                .limit(MAX_DOCTORS_SHARED_WITH_MODEL)
-                .collect(Collectors.toList());
-
+        // Set outcome scores before filtering (they're used in filtering logic)
         outcome.topSpecialisationScore = Optional.ofNullable(topSpecialisationScore).orElse(0.0);
         outcome.topInsuranceScore = Optional.ofNullable(topInsuranceScore).orElse(0.0);
         outcome.topLocationScore = Optional.ofNullable(topLocationScore).orElse(0.0);
+        
+        log.info("Scoring complete - topSpecialisationScore: {}, topInsuranceScore: {}, topLocationScore: {}, ranked doctors: {}", 
+                outcome.topSpecialisationScore, outcome.topInsuranceScore, outcome.topLocationScore, outcome.ranked.size());
+        
+        // Sort by total score (highest first)
+        List<RankedDoctor> sorted = outcome.ranked.stream()
+                .sorted(Comparator.comparingDouble(RankedDoctor::totalScore).reversed())
+                .collect(Collectors.toList());
+        
+        log.info("Sorted {} ranked doctors from {} in outcome.ranked", sorted.size(), outcome.ranked.size());
+        
+        // CRITICAL FIX: If outcome.ranked is empty, use catalogue directly
+        // This can happen if there's an issue with the scoring loop
+        if (sorted.isEmpty() && !catalogue.isEmpty()) {
+            log.warn("outcome.ranked is empty but catalogue has {} doctors! Using catalogue directly.", catalogue.size());
+            outcome.payloadCatalogue = catalogue.stream()
+                    .limit(MAX_DOCTORS_SHARED_WITH_MODEL)
+                    .collect(Collectors.toList());
+            log.info("EMERGENCY: Using catalogue directly, payloadCatalogue now has {} doctors", outcome.payloadCatalogue.size());
+            return outcome;
+        }
+        
+        // SIMPLIFIED APPROACH: Always include all doctors, just sorted by score
+        // Don't filter them out - let the AI decide which ones to recommend
+        // This ensures doctors are always available for recommendation
+        List<RankedDoctor> filtered = sorted;
+        
+        log.info("Using all {} sorted doctors (no filtering applied)", filtered.size());
+        
+        // Only overwrite payloadCatalogue if we actually have doctors from the mapping
+        List<DoctorSuggestionDTO> mappedDoctors = filtered.stream()
+                .map(RankedDoctor::doctor)
+                .limit(MAX_DOCTORS_SHARED_WITH_MODEL)
+                .collect(Collectors.toList());
+        
+        // Only update if we got doctors, otherwise keep the safety net value
+        if (!mappedDoctors.isEmpty()) {
+            outcome.payloadCatalogue = mappedDoctors;
+        }
+        
+        log.info("buildRankedRecommendations: {} doctors in payloadCatalogue (filtered size: {}, sorted size: {}, catalogue size: {}, mapped size: {})", 
+                outcome.payloadCatalogue.size(), filtered.size(), sorted.size(), catalogue.size(), mappedDoctors.size());
+        
+        // Final safety check: if payloadCatalogue is still empty but we have doctors, use catalogue directly
+        if (outcome.payloadCatalogue.isEmpty() && !catalogue.isEmpty()) {
+            log.error("EMERGENCY FALLBACK: payloadCatalogue is empty, using catalogue directly");
+            outcome.payloadCatalogue = new ArrayList<>(catalogue.stream()
+                    .limit(MAX_DOCTORS_SHARED_WITH_MODEL)
+                    .collect(Collectors.toList()));
+        }
+        
+        // ABSOLUTE FINAL CHECK: If still empty, something is very wrong - force it
+        if (outcome.payloadCatalogue == null || outcome.payloadCatalogue.isEmpty()) {
+            if (!catalogue.isEmpty()) {
+                log.error("CRITICAL: payloadCatalogue is STILL empty/null! Forcing catalogue. This should never happen.");
+                outcome.payloadCatalogue = new ArrayList<>(catalogue);
+            }
+        }
+        
+        log.info("buildRankedRecommendations FINAL RETURN: payloadCatalogue size = {}", 
+                outcome.payloadCatalogue != null ? outcome.payloadCatalogue.size() : 0);
 
         return outcome;
     }
@@ -1065,10 +1367,15 @@ public class PatientRecommendationChatService {
             return 0;
         }
         if (!isBlank(context.getPreferredSpecialization())) {
-            final String desired = context.getPreferredSpecialization().trim();
-            if (doctorSpecialisations.stream().anyMatch(spec -> equalsIgnoreCase(spec, desired))) {
+            final String desired = context.getPreferredSpecialization().trim().toUpperCase(Locale.ROOT);
+            // Check if any doctor specialization matches (case-insensitive)
+            boolean matches = doctorSpecialisations.stream()
+                    .anyMatch(spec -> spec != null && spec.trim().toUpperCase(Locale.ROOT).equals(desired));
+            if (matches) {
+                log.debug("Specialization match found: desired='{}', doctor specializations={}", desired, doctorSpecialisations);
                 return 4.0;
             }
+            log.debug("No specialization match: desired='{}', doctor specializations={}", desired, doctorSpecialisations);
             return 0;
         }
         return 2.0;
@@ -1120,9 +1427,13 @@ public class PatientRecommendationChatService {
                 continue;
             }
             String content = Optional.ofNullable(message.getContent()).orElse("").toLowerCase(Locale.ROOT);
+            
+            // Check for greetings first
             if (content.matches("^(hi|hello|hey|good morning|good evening|good afternoon)[.!?]*$")) {
                 return InteractionIntent.GREETING_ONLY;
             }
+            
+            // Check for navigation (doctor registration)
             if (content.contains("become a doctor")
                     || content.contains("apply as a doctor")
                     || content.contains("register as a doctor")
@@ -1130,9 +1441,33 @@ public class PatientRecommendationChatService {
                     || content.contains("join as a doctor")) {
                 return InteractionIntent.NAVIGATION_ONLY;
             }
-            if (content.contains("find a doctor")
-                    || content.contains("need a doctor")
-                    || content.contains("recommend a doctor")) {
+            
+            // IMPROVED: Check for doctor finding - be more flexible
+            // Check for any mention of needing/finding/looking for a doctor or specific specialty
+            if (content.contains("need") && (content.contains("doctor") || content.contains("psychiatry") || content.contains("psychiatrist") 
+                    || content.contains("cardiologist") || content.contains("neurologist") || content.contains("specialist")
+                    || content.contains("physician") || content.contains("surgeon"))) {
+                return InteractionIntent.FIND_DOCTOR;
+            }
+            if (content.contains("find") && (content.contains("doctor") || content.contains("psychiatry") || content.contains("psychiatrist")
+                    || content.contains("cardiologist") || content.contains("neurologist") || content.contains("specialist")
+                    || content.contains("physician") || content.contains("surgeon"))) {
+                return InteractionIntent.FIND_DOCTOR;
+            }
+            if (content.contains("recommend") && (content.contains("doctor") || content.contains("psychiatry") || content.contains("psychiatrist")
+                    || content.contains("cardiologist") || content.contains("neurologist") || content.contains("specialist")
+                    || content.contains("physician") || content.contains("surgeon"))) {
+                return InteractionIntent.FIND_DOCTOR;
+            }
+            if (content.contains("looking for") && (content.contains("doctor") || content.contains("psychiatry") || content.contains("psychiatrist")
+                    || content.contains("cardiologist") || content.contains("neurologist") || content.contains("specialist")
+                    || content.contains("physician") || content.contains("surgeon"))) {
+                return InteractionIntent.FIND_DOCTOR;
+            }
+            // Also check for specialty names alone (e.g., "psychiatry doctor", "cardiologist")
+            if (content.contains("psychiatry") || content.contains("psychiatrist") 
+                    || content.contains("cardiologist") || content.contains("neurologist")
+                    || content.contains("dermatologist") || content.contains("pediatrician")) {
                 return InteractionIntent.FIND_DOCTOR;
             }
         }

@@ -56,6 +56,15 @@ public class HealthcareProvider extends Users {
     @OneToMany(mappedBy = "provider", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<MedicalRecord> medicalRecords;
 
+    @OneToMany(mappedBy = "provider", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<DayAvailability> dayAvailabilities;
+
+    @OneToMany(mappedBy = "provider", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<BlockedTimeSlot> blockedTimeSlots;
+
+    @Column(name = "appointment_duration_minutes")
+    private Integer appointmentDurationMinutes = 30; // Default 30 minutes
+
     private Boolean adminFlagged = false;
 
     @Column(columnDefinition = "TEXT")

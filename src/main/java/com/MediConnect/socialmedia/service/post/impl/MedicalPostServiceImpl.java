@@ -961,6 +961,8 @@ public class MedicalPostServiceImpl implements MedicalPostService {
                 : "General Practice";
             userDetails.put("specialty", specialty);
             userDetails.put("userType", "doctor");
+            // Include profile picture
+            userDetails.put("profilePicture", provider.getProfilePicture());
             return userDetails;
         }
         
@@ -971,6 +973,8 @@ public class MedicalPostServiceImpl implements MedicalPostService {
             userDetails.put("name", patient.getFirstName() + " " + patient.getLastName());
             userDetails.put("specialty", "Patient");
             userDetails.put("userType", "patient");
+            // Include profile picture
+            userDetails.put("profilePicture", patient.getProfilePicture());
             return userDetails;
         }
         
@@ -978,6 +982,7 @@ public class MedicalPostServiceImpl implements MedicalPostService {
         userDetails.put("name", "Unknown User");
         userDetails.put("specialty", "User");
         userDetails.put("userType", "unknown");
+        userDetails.put("profilePicture", null);
         return userDetails;
     }
     

@@ -50,6 +50,32 @@ public class PatientController {
     private final NotificationPreferencesService notificationPreferencesService;
     private final PrivacySettingsService privacySettingsService;
     private final CloudinaryService cloudinaryService;
+    private final com.MediConnect.EntryRelated.repository.HealthcareProviderRepo healthcareProviderRepo;
+    private final com.MediConnect.Repos.UserRepo userRepo;
+
+    @GetMapping("/check-username")
+    public ResponseEntity<Map<String, Object>> checkUsername(@RequestParam String username) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            // Check if username exists in any user table (patient, healthcare provider, or admin)
+            boolean exists = patientRepo.existsByUsername(username) 
+                    || healthcareProviderRepo.existsByUsername(username)
+                    || userRepo.existsByUsername(username);
+            
+            response.put("status", "success");
+            response.put("available", !exists);
+            if (exists) {
+                response.put("message", "Username already exists");
+            } else {
+                response.put("message", "Username is available");
+            }
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            response.put("status", "error");
+            response.put("message", "Error checking username availability");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
 
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(@Valid @RequestBody SignupPatientRequestDTO patientInfo) {

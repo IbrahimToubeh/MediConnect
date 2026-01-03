@@ -8,6 +8,10 @@ import com.MediConnect.EntryRelated.entities.Patient;
 import com.MediConnect.EntryRelated.repository.AppointmentRepository;
 import com.MediConnect.EntryRelated.repository.HealthcareProviderRepo;
 import com.MediConnect.EntryRelated.repository.PatientRepo;
+import com.MediConnect.EntryRelated.repository.DayAvailabilityRepository;
+import com.MediConnect.EntryRelated.repository.BlockedTimeSlotRepository;
+import com.MediConnect.EntryRelated.entities.DayAvailability;
+import com.MediConnect.EntryRelated.entities.BlockedTimeSlot;
 import com.MediConnect.EntryRelated.service.appointment.AppointmentService;
 import com.MediConnect.config.JWTService;
 import com.MediConnect.socialmedia.service.NotificationService;
@@ -19,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.ZoneOffset; // Added UTC
 import java.util.*;
 
@@ -34,6 +37,8 @@ public class AppointmentServiceImpl implements AppointmentService {
     private final AppointmentRepository appointmentRepository;
     private final PatientRepo patientRepo;
     private final HealthcareProviderRepo healthcareProviderRepo;
+    private final DayAvailabilityRepository dayAvailabilityRepository;
+    private final BlockedTimeSlotRepository blockedTimeSlotRepository;
     private final JWTService jwtService;
     private final NotificationService notificationService;
     private final ChatService chatService;
@@ -60,7 +65,7 @@ public class AppointmentServiceImpl implements AppointmentService {
             String dateTimeStr = request.get("appointmentDateTime").toString();
             Date appointmentDateTime;
 
-            // ✅ FIX: Force UTC Parsing
+            
             try {
                 // Handle ISO format (e.g., "2025-11-22T14:30:00.000Z")
                 String cleanedDateTime = dateTimeStr.replace("Z", "").replace("z", "");
@@ -206,9 +211,90 @@ public class AppointmentServiceImpl implements AppointmentService {
 
                 if (Boolean.TRUE.equals(apt.getShareMedicalRecords())) {
                     Map<String, Object> med = new HashMap<>();
+                    
+                    // Basic Information
+                    med.put("gender", apt.getPatient().getGender());
+                    if (apt.getPatient().getDateOfBirth() != null) {
+                        SimpleDateFormat dobFormat = new SimpleDateFormat("yyyy-MM-dd");
+                        dobFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+                        med.put("dateOfBirth", dobFormat.format(apt.getPatient().getDateOfBirth()));
+                    } else {
+                        med.put("dateOfBirth", null);
+                    }
+                    med.put("height", apt.getPatient().getHeight());
+                    med.put("weight", apt.getPatient().getWeight());
+                    med.put("bloodType", apt.getPatient().getBloodType() != null ? apt.getPatient().getBloodType().toString() : null);
+                    
+                    // Medical Information
                     med.put("allergies", apt.getPatient().getAllergies());
                     med.put("medicalConditions", apt.getPatient().getMedicalConditions());
                     med.put("previousSurgeries", apt.getPatient().getPreviousSurgeries());
+                    med.put("familyMedicalHistory", apt.getPatient().getFamilyMedicalHistory());
+                    
+                    // Lifestyle Information
+                    med.put("dietaryHabits", apt.getPatient().getDietaryHabits() != null ? apt.getPatient().getDietaryHabits().toString() : null);
+                    med.put("alcoholConsumption", apt.getPatient().getAlcoholConsumption() != null ? apt.getPatient().getAlcoholConsumption().toString() : null);
+                    med.put("physicalActivity", apt.getPatient().getPhysicalActivity() != null ? apt.getPatient().getPhysicalActivity().toString() : null);
+                    med.put("smokingStatus", apt.getPatient().getSmokingStatus() != null ? apt.getPatient().getSmokingStatus().toString() : null);
+                    med.put("mentalHealthCondition", apt.getPatient().getMentalHealthCondition() != null ? apt.getPatient().getMentalHealthCondition().toString() : null);
+                    
+                    // Current Medications
+                    List<Map<String, Object>> medications = new ArrayList<>();
+                    if (apt.getPatient().getMedications() != null) {
+                        SimpleDateFormat medDateFormat = new SimpleDateFormat("yyyy-MM-dd");
+                        medDateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+                        for (com.MediConnect.EntryRelated.entities.Medication medication : apt.getPatient().getMedications()) {
+                            Map<String, Object> medMap = new HashMap<>();
+                            medMap.put("id", medication.getId());
+                            medMap.put("medicationName", medication.getMedicationName());
+                            medMap.put("medicationDosage", medication.getMedicationDosage());
+                            medMap.put("medicationFrequency", medication.getMedicationFrequency());
+                            medMap.put("medicationStartDate", medication.getMedicationStartDate() != null ? medDateFormat.format(medication.getMedicationStartDate()) : null);
+                            medMap.put("medicationEndDate", medication.getMedicationEndDate() != null ? medDateFormat.format(medication.getMedicationEndDate()) : null);
+                            medMap.put("inUse", medication.isInUse());
+                            medications.add(medMap);
+                        }
+                    }
+                    med.put("medications", medications);
+                    
+                    // Mental Health Medications
+                    List<Map<String, Object>> mentalHealthMedications = new ArrayList<>();
+                    if (apt.getPatient().getMentalHealthMedications() != null) {
+                        SimpleDateFormat medDateFormat = new SimpleDateFormat("yyyy-MM-dd");
+                        medDateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+                        for (com.MediConnect.EntryRelated.entities.MentalHealthMedication medication : apt.getPatient().getMentalHealthMedications()) {
+                            Map<String, Object> medMap = new HashMap<>();
+                            medMap.put("id", medication.getId());
+                            medMap.put("medicationName", medication.getMedicationName());
+                            medMap.put("medicationDosage", medication.getMedicationDosage());
+                            medMap.put("medicationFrequency", medication.getMedicationFrequency());
+                            medMap.put("medicationStartDate", medication.getMedicationStartDate() != null ? medDateFormat.format(medication.getMedicationStartDate()) : null);
+                            medMap.put("medicationEndDate", medication.getMedicationEndDate() != null ? medDateFormat.format(medication.getMedicationEndDate()) : null);
+                            medMap.put("inUse", medication.isInUse());
+                            mentalHealthMedications.add(medMap);
+                        }
+                    }
+                    med.put("mentalHealthMedications", mentalHealthMedications);
+                    
+                    // Lab Results
+                    List<Map<String, Object>> labResults = new ArrayList<>();
+                    if (apt.getPatient().getLaboratoryResults() != null) {
+                        for (com.MediConnect.EntryRelated.entities.LaboratoryResult lab : apt.getPatient().getLaboratoryResults()) {
+                            Map<String, Object> labMap = new HashMap<>();
+                            labMap.put("id", lab.getId());
+                            labMap.put("description", lab.getDescription());
+                            labMap.put("hasImage", lab.getImage() != null && lab.getImage().length > 0);
+                            labMap.put("imageSize", lab.getImage() != null ? lab.getImage().length : 0);
+                            labMap.put("resultUrl", lab.getResultUrl());
+                            labResults.add(labMap);
+                        }
+                    }
+                    med.put("labResults", labResults);
+                    
+                    // Insurance Information
+                    med.put("insuranceProvider", apt.getPatient().getInsuranceProvider());
+                    med.put("insuranceNumber", apt.getPatient().getInsuranceNumber());
+                    
                     aptMap.put("medicalRecords", med);
                 }
                 aptMap.put("status", apt.getStatus() != null ? apt.getStatus().name().toLowerCase() : "pending");
@@ -287,11 +373,72 @@ public class AppointmentServiceImpl implements AppointmentService {
 
                 if (Boolean.TRUE.equals(apt.getShareMedicalRecords())) {
                     Map<String, Object> med = new HashMap<>();
+                    
+                    // Basic Information
+                    med.put("gender", apt.getPatient().getGender());
+                    if (apt.getPatient().getDateOfBirth() != null) {
+                        SimpleDateFormat dobFormat = new SimpleDateFormat("yyyy-MM-dd");
+                        dobFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+                        med.put("dateOfBirth", dobFormat.format(apt.getPatient().getDateOfBirth()));
+                    } else {
+                        med.put("dateOfBirth", null);
+                    }
+                    med.put("height", apt.getPatient().getHeight());
+                    med.put("weight", apt.getPatient().getWeight());
+                    med.put("bloodType", apt.getPatient().getBloodType() != null ? apt.getPatient().getBloodType().toString() : null);
+                    
+                    // Medical Information
                     med.put("allergies", apt.getPatient().getAllergies());
                     med.put("medicalConditions", apt.getPatient().getMedicalConditions());
                     med.put("previousSurgeries", apt.getPatient().getPreviousSurgeries());
-
-                    // Add Lab Results
+                    med.put("familyMedicalHistory", apt.getPatient().getFamilyMedicalHistory());
+                    
+                    // Lifestyle Information
+                    med.put("dietaryHabits", apt.getPatient().getDietaryHabits() != null ? apt.getPatient().getDietaryHabits().toString() : null);
+                    med.put("alcoholConsumption", apt.getPatient().getAlcoholConsumption() != null ? apt.getPatient().getAlcoholConsumption().toString() : null);
+                    med.put("physicalActivity", apt.getPatient().getPhysicalActivity() != null ? apt.getPatient().getPhysicalActivity().toString() : null);
+                    med.put("smokingStatus", apt.getPatient().getSmokingStatus() != null ? apt.getPatient().getSmokingStatus().toString() : null);
+                    med.put("mentalHealthCondition", apt.getPatient().getMentalHealthCondition() != null ? apt.getPatient().getMentalHealthCondition().toString() : null);
+                    
+                    // Current Medications
+                    List<Map<String, Object>> medications = new ArrayList<>();
+                    if (apt.getPatient().getMedications() != null) {
+                        SimpleDateFormat medDateFormat = new SimpleDateFormat("yyyy-MM-dd");
+                        medDateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+                        for (com.MediConnect.EntryRelated.entities.Medication medication : apt.getPatient().getMedications()) {
+                            Map<String, Object> medMap = new HashMap<>();
+                            medMap.put("id", medication.getId());
+                            medMap.put("medicationName", medication.getMedicationName());
+                            medMap.put("medicationDosage", medication.getMedicationDosage());
+                            medMap.put("medicationFrequency", medication.getMedicationFrequency());
+                            medMap.put("medicationStartDate", medication.getMedicationStartDate() != null ? medDateFormat.format(medication.getMedicationStartDate()) : null);
+                            medMap.put("medicationEndDate", medication.getMedicationEndDate() != null ? medDateFormat.format(medication.getMedicationEndDate()) : null);
+                            medMap.put("inUse", medication.isInUse());
+                            medications.add(medMap);
+                        }
+                    }
+                    med.put("medications", medications);
+                    
+                    // Mental Health Medications
+                    List<Map<String, Object>> mentalHealthMedications = new ArrayList<>();
+                    if (apt.getPatient().getMentalHealthMedications() != null) {
+                        SimpleDateFormat medDateFormat = new SimpleDateFormat("yyyy-MM-dd");
+                        medDateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+                        for (com.MediConnect.EntryRelated.entities.MentalHealthMedication medication : apt.getPatient().getMentalHealthMedications()) {
+                            Map<String, Object> medMap = new HashMap<>();
+                            medMap.put("id", medication.getId());
+                            medMap.put("medicationName", medication.getMedicationName());
+                            medMap.put("medicationDosage", medication.getMedicationDosage());
+                            medMap.put("medicationFrequency", medication.getMedicationFrequency());
+                            medMap.put("medicationStartDate", medication.getMedicationStartDate() != null ? medDateFormat.format(medication.getMedicationStartDate()) : null);
+                            medMap.put("medicationEndDate", medication.getMedicationEndDate() != null ? medDateFormat.format(medication.getMedicationEndDate()) : null);
+                            medMap.put("inUse", medication.isInUse());
+                            mentalHealthMedications.add(medMap);
+                        }
+                    }
+                    med.put("mentalHealthMedications", mentalHealthMedications);
+                    
+                    // Lab Results
                     List<Map<String, Object>> labResults = new ArrayList<>();
                     if (apt.getPatient().getLaboratoryResults() != null) {
                         for (com.MediConnect.EntryRelated.entities.LaboratoryResult lab : apt.getPatient().getLaboratoryResults()) {
@@ -305,6 +452,10 @@ public class AppointmentServiceImpl implements AppointmentService {
                         }
                     }
                     med.put("labResults", labResults);
+                    
+                    // Insurance Information
+                    med.put("insuranceProvider", apt.getPatient().getInsuranceProvider());
+                    med.put("insuranceNumber", apt.getPatient().getInsuranceNumber());
 
                     aptMap.put("medicalRecords", med);
                 }
@@ -698,7 +849,7 @@ public class AppointmentServiceImpl implements AppointmentService {
     @Transactional(readOnly = true)
     public Map<String, Object> getAvailableTimeSlots(Long doctorId, String date, String startTime, String endTime) {
         try {
-            healthcareProviderRepo.findById(doctorId)
+            HealthcareProvider provider = healthcareProviderRepo.findById(doctorId)
                     .orElseThrow(() -> new RuntimeException("Doctor not found"));
 
             Date appointmentDate;
@@ -710,6 +861,58 @@ public class AppointmentServiceImpl implements AppointmentService {
                 throw new RuntimeException("Invalid date format. Expected YYYY-MM-DD: " + e.getMessage());
             }
 
+            // Get day of week
+            Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            cal.setTime(appointmentDate);
+            String[] daysOfWeek = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+            String dayOfWeek = daysOfWeek[cal.get(Calendar.DAY_OF_WEEK) - 1];
+
+            // Get day availability for this day
+            DayAvailability dayAvailability = dayAvailabilityRepository
+                    .findByProviderAndDayOfWeek(provider, dayOfWeek)
+                    .orElse(null);
+
+            // Check if day is available
+            boolean isDayAvailable = false;
+            String actualStartTime = startTime;
+            String actualEndTime = endTime;
+            
+            if (dayAvailability != null) {
+                // Day availability exists - check if enabled
+                if (Boolean.TRUE.equals(dayAvailability.getEnabled())) {
+                    isDayAvailable = true;
+                    if (dayAvailability.getStartTime() != null && dayAvailability.getEndTime() != null) {
+                        actualStartTime = dayAvailability.getStartTime();
+                        actualEndTime = dayAvailability.getEndTime();
+                    }
+                } else {
+                    // Day is explicitly disabled
+                    isDayAvailable = false;
+                }
+            } else {
+                // No day availability record - fall back to old system (availableDays)
+                if (provider.getAvailableDays() != null && !provider.getAvailableDays().isEmpty()) {
+                    // Check if day is in availableDays list
+                    isDayAvailable = provider.getAvailableDays().stream()
+                            .anyMatch(day -> day.equalsIgnoreCase(dayOfWeek));
+                } else {
+                    // No restrictions - allow all days
+                    isDayAvailable = true;
+                }
+            }
+            
+            // If day is not available, return empty slots
+            if (!isDayAvailable) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("status", "success");
+                response.put("data", new ArrayList<>()); // Return empty list
+                return response;
+            }
+
+            // Get appointment duration (default 30 minutes)
+            Integer appointmentDuration = provider.getAppointmentDurationMinutes() != null 
+                    ? provider.getAppointmentDurationMinutes() : 30;
+
             // Use UTC Calendar
             Calendar startOfDay = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
             startOfDay.setTime(appointmentDate);
@@ -718,49 +921,136 @@ public class AppointmentServiceImpl implements AppointmentService {
             startOfDay.set(Calendar.SECOND, 0);
             startOfDay.set(Calendar.MILLISECOND, 0);
 
-            Calendar endOfDay = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            endOfDay.setTime(appointmentDate);
-            endOfDay.add(Calendar.DAY_OF_MONTH, 1);
-            endOfDay.set(Calendar.HOUR_OF_DAY, 0);
-            endOfDay.set(Calendar.MINUTE, 0);
-            endOfDay.set(Calendar.SECOND, 0);
-            endOfDay.set(Calendar.MILLISECOND, 0);
-
             List<AppointmentEntity> allDoctorAppointments = appointmentRepository.findByHealthcareProviderId(doctorId);
 
-            List<AppointmentEntity> confirmedAppointments = new ArrayList<>();
+            // Include CONFIRMED, PENDING, and RESCHEDULED appointments as they all occupy time slots
+            List<AppointmentEntity> bookedAppointments = new ArrayList<>();
+            System.out.println("DEBUG: Checking appointments for doctorId=" + doctorId + ", date=" + date);
+            System.out.println("DEBUG: Total appointments found: " + allDoctorAppointments.size());
+            
             for (AppointmentEntity apt : allDoctorAppointments) {
-                if (apt.getStatus() == AppointmentStatus.CONFIRMED && apt.getAppointmentDateTime() != null) {
+                AppointmentStatus status = apt.getStatus();
+                System.out.println("DEBUG: Checking appointment ID=" + apt.getId() + ", Status=" + status + ", DateTime=" + apt.getAppointmentDateTime());
+                
+                // Include appointments that occupy a time slot (confirmed, pending, or rescheduled)
+                if ((status == AppointmentStatus.CONFIRMED || 
+                     status == AppointmentStatus.PENDING || 
+                     status == AppointmentStatus.RESCHEDULED) && 
+                    apt.getAppointmentDateTime() != null) {
                     Calendar aptCal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
                     aptCal.setTime(apt.getAppointmentDateTime());
+                    
+                    // Normalize to start of day for comparison
+                    Calendar aptStartOfDay = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+                    aptStartOfDay.setTime(apt.getAppointmentDateTime());
+                    aptStartOfDay.set(Calendar.HOUR_OF_DAY, 0);
+                    aptStartOfDay.set(Calendar.MINUTE, 0);
+                    aptStartOfDay.set(Calendar.SECOND, 0);
+                    aptStartOfDay.set(Calendar.MILLISECOND, 0);
 
-                    // Compare using UTC calendars
-                    if (aptCal.get(Calendar.YEAR) == startOfDay.get(Calendar.YEAR) &&
-                            aptCal.get(Calendar.DAY_OF_YEAR) == startOfDay.get(Calendar.DAY_OF_YEAR)) {
-                        confirmedAppointments.add(apt);
+                    // Compare using UTC calendars - check if same day
+                    boolean isSameDay = aptStartOfDay.getTimeInMillis() == startOfDay.getTimeInMillis();
+                    
+                    System.out.println("DEBUG: Appointment ID=" + apt.getId() + " - aptDate=" + aptStartOfDay.getTime() + " (" + aptStartOfDay.get(Calendar.YEAR) + "-" + (aptStartOfDay.get(Calendar.MONTH)+1) + "-" + aptStartOfDay.get(Calendar.DAY_OF_MONTH) + "), requestedDate=" + startOfDay.getTime() + " (" + startOfDay.get(Calendar.YEAR) + "-" + (startOfDay.get(Calendar.MONTH)+1) + "-" + startOfDay.get(Calendar.DAY_OF_MONTH) + "), isSameDay=" + isSameDay);
+                    
+                    if (isSameDay) {
+                        bookedAppointments.add(apt);
+                        System.out.println("DEBUG: ✓ Added appointment ID=" + apt.getId() + " (Status=" + status + ") to booked appointments for date " + date);
+                    } else {
+                        System.out.println("DEBUG: ✗ Appointment ID=" + apt.getId() + " is on a different day");
                     }
+                } else {
+                    System.out.println("DEBUG: ✗ Skipping appointment ID=" + apt.getId() + " - Status=" + status + " (not CONFIRMED/PENDING/RESCHEDULED or DateTime is null)");
                 }
             }
 
+            // Get blocked time slots for this date
+            List<BlockedTimeSlot> blockedSlots = blockedTimeSlotRepository.findByProviderAndDate(provider, appointmentDate);
+
             Set<String> bookedSlots = new HashSet<>();
-            for (AppointmentEntity apt : confirmedAppointments) {
-                Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-                cal.setTime(apt.getAppointmentDateTime());
-                int hour = cal.get(Calendar.HOUR_OF_DAY);
-                int minute = cal.get(Calendar.MINUTE);
-                String bookedTime = String.format("%02d:%02d", hour, minute);
+            // Use system default timezone for time extraction (should match doctor's availability timezone)
+            TimeZone systemTimezone = TimeZone.getDefault();
+            System.out.println("DEBUG: Using timezone for time extraction: " + systemTimezone.getID() + " (offset: " + systemTimezone.getRawOffset() / (60 * 60 * 1000) + " hours)");
+            
+            for (AppointmentEntity apt : bookedAppointments) {
+                // Extract time in system default timezone to match the doctor's availability times
+                // The appointment DateTime is stored in UTC, but we need to extract it in local time
+                // to match the time slot format (HH:mm) which is timezone-agnostic
+                Calendar aptCalLocal = Calendar.getInstance(systemTimezone);
+                aptCalLocal.setTime(apt.getAppointmentDateTime());
+                
+                // Also check UTC for debugging
+                Calendar aptCalUTC = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+                aptCalUTC.setTime(apt.getAppointmentDateTime());
+                
+                int hourLocal = aptCalLocal.get(Calendar.HOUR_OF_DAY);
+                int minuteLocal = aptCalLocal.get(Calendar.MINUTE);
+                int hourUTC = aptCalUTC.get(Calendar.HOUR_OF_DAY);
+                int minuteUTC = aptCalUTC.get(Calendar.MINUTE);
+                
+                // Use local time for the booked slot (matching what user sees/selects)
+                String bookedTime = String.format("%02d:%02d", hourLocal, minuteLocal);
                 bookedSlots.add(bookedTime);
+                
+                System.out.println("DEBUG: Marking time slot as booked: " + bookedTime + " (Local: " + hourLocal + ":" + String.format("%02d", minuteLocal) + ", UTC: " + hourUTC + ":" + String.format("%02d", minuteUTC) + ", from appointment ID=" + apt.getId() + ", Status=" + apt.getStatus() + ", DateTime=" + apt.getAppointmentDateTime() + ")");
             }
+            
+            System.out.println("DEBUG: Total booked slots: " + bookedSlots.size() + " - " + bookedSlots);
+
+            // Store blocked time ranges for overlap checking
+            List<Calendar[]> blockedRanges = new ArrayList<>();
+            for (BlockedTimeSlot blocked : blockedSlots) {
+                String[] blockedStartParts = blocked.getStartTime().split(":");
+                String[] blockedEndParts = blocked.getEndTime().split(":");
+                int blockedStartHour = Integer.parseInt(blockedStartParts[0]);
+                int blockedStartMinute = Integer.parseInt(blockedStartParts[1]);
+                int blockedEndHour = Integer.parseInt(blockedEndParts[0]);
+                int blockedEndMinute = Integer.parseInt(blockedEndParts[1]);
+
+                Calendar blockedStart = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+                blockedStart.setTime(appointmentDate);
+                blockedStart.set(Calendar.HOUR_OF_DAY, blockedStartHour);
+                blockedStart.set(Calendar.MINUTE, blockedStartMinute);
+                blockedStart.set(Calendar.SECOND, 0);
+                blockedStart.set(Calendar.MILLISECOND, 0);
+
+                Calendar blockedEnd = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+                blockedEnd.setTime(appointmentDate);
+                blockedEnd.set(Calendar.HOUR_OF_DAY, blockedEndHour);
+                blockedEnd.set(Calendar.MINUTE, blockedEndMinute);
+                blockedEnd.set(Calendar.SECOND, 0);
+                blockedEnd.set(Calendar.MILLISECOND, 0);
+
+                blockedRanges.add(new Calendar[]{blockedStart, blockedEnd});
+            }
+            
+            // Helper function to check if a time slot overlaps with any blocked range
+            java.util.function.Function<Calendar, Boolean> isSlotBlocked = (slotTime) -> {
+                Calendar slotEnd = (Calendar) slotTime.clone();
+                slotEnd.add(Calendar.MINUTE, appointmentDuration);
+                
+                for (Calendar[] range : blockedRanges) {
+                    Calendar rangeStart = range[0];
+                    Calendar rangeEnd = range[1];
+                    
+                    // Check if slot overlaps with blocked range
+                    // Slot overlaps if: slotStart < rangeEnd AND slotEnd > rangeStart
+                    if (slotTime.before(rangeEnd) && slotEnd.after(rangeStart)) {
+                        return true;
+                    }
+                }
+                return false;
+            };
 
             List<Map<String, Object>> timeSlots = new ArrayList<>();
             Calendar slotStart = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
             slotStart.setTime(appointmentDate);
 
-            String[] startParts = startTime.split(":");
+            String[] startParts = actualStartTime.split(":");
             int startHour = Integer.parseInt(startParts[0]);
             int startMinute = Integer.parseInt(startParts[1]);
 
-            String[] endParts = endTime.split(":");
+            String[] endParts = actualEndTime.split(":");
             int endHour = Integer.parseInt(endParts[0]);
             int endMinute = Integer.parseInt(endParts[1]);
 
@@ -781,14 +1071,21 @@ public class AppointmentServiceImpl implements AppointmentService {
                 int minute = slotStart.get(Calendar.MINUTE);
                 String timeString = String.format("%02d:%02d", hour, minute);
 
-                boolean isAvailable = !bookedSlots.contains(timeString);
+                // Check if slot is booked
+                boolean isBooked = bookedSlots.contains(timeString);
+                
+                // Check if slot overlaps with any blocked time range
+                boolean isBlocked = isSlotBlocked.apply(slotStart);
+
+                // Slot is available if it's not booked and not blocked
+                boolean isAvailable = !isBooked && !isBlocked;
 
                 Map<String, Object> slot = new HashMap<>();
                 slot.put("time", timeString);
                 slot.put("available", isAvailable);
 
                 timeSlots.add(slot);
-                slotStart.add(Calendar.MINUTE, 30);
+                slotStart.add(Calendar.MINUTE, appointmentDuration);
             }
 
             Map<String, Object> response = new HashMap<>();

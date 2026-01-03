@@ -39,6 +39,9 @@ public class UserNotificationPreferences {
     private Boolean postComments = true;
     
     @Column(nullable = false)
+    private Boolean commentLikes = true;
+    
+    @Column(nullable = false)
     private Boolean commentReplies = true;
     
     // Healthcare notifications
@@ -89,6 +92,7 @@ public class UserNotificationPreferences {
             case "push" -> pushNotifications;
             case "post_likes", "postlikes" -> postLikes;
             case "post_comments", "postcomments" -> postComments;
+            case "comment_likes", "commentlikes" -> commentLikes;
             case "comment_replies", "commentreplies" -> commentReplies;
             case "appointment_reminders", "appointmentreminders" -> appointmentReminders;
             case "prescription_updates", "prescriptionupdates" -> prescriptionUpdates;

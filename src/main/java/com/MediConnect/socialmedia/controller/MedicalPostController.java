@@ -120,7 +120,7 @@ public class MedicalPostController {
     @PostMapping(value = "/create", consumes = {"multipart/form-data"})
     public ResponseEntity<Map<String, Object>> createPost(
             @RequestParam("content") String content,
-            @RequestParam("privacy") String privacy,
+            @RequestParam(value = "privacy", required = false, defaultValue = "PUBLIC") String privacy,
             @RequestParam(value = "mediaFiles", required = false) MultipartFile[] mediaFiles,
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             HttpServletRequest request) {
@@ -204,7 +204,8 @@ public class MedicalPostController {
             postRequest.setContent(content.trim());
             postRequest.setMediaUrl(singleMediaUrl); // For backward compatibility
             postRequest.setMediaUrls(mediaUrlsJson); // JSON array of all URLs
-            postRequest.setPrivacy(PostPrivacy.valueOf(privacy.toUpperCase()));
+            // All posts are public
+            postRequest.setPrivacy(PostPrivacy.PUBLIC);
             
             // Create the post
             MedicalPost post = medicalPostService.createPost(postRequest);
@@ -251,8 +252,16 @@ public class MedicalPostController {
     }
 
     @PostMapping("/comment")
-    public ResponseEntity<Map<String, Object>> addComment(@RequestBody CreateCommentRequestDTO commentRequest) {
+    public ResponseEntity<Map<String, Object>> addComment(
+            @RequestBody CreateCommentRequestDTO commentRequest,
+            @RequestHeader("Authorization") String token) {
         try {
+            // Extract user ID from token instead of trusting the request body
+            Long userId = extractUserIdFromToken(token);
+            
+            // Override the commenterId from the request with the authenticated user's ID
+            commentRequest.setCommenterId(userId);
+            
             medicalPostCommentService.createMedicalPostComment(commentRequest);
             return ResponseEntity.ok(Map.of(
                 "status", "success",
